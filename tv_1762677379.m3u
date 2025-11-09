@@ -1,6 +1,4 @@
 #EXTM3U x-tvg-url="http://epg.catvod.com/epg.xml"
-#EXTINF:-1 group-title="温馨提示",免費訂閲
-https://www.catvod.com/catvod.mp4
 #EXTINF:-1 group-title="香港频道",翡翠台
 https://live.catvod.com/live.php?id=jade_twn&token=5df6e946bdd6447c2accf0910b84bbbe7fc47dc600fdef6fac26617057adb16d%3A1762677379%3AMTg1LjIyMC4yMzYuNA%3D%3D
 #EXTINF:-1 group-title="香港频道",翡翠台
