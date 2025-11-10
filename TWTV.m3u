@@ -378,13 +378,13 @@ https://live.catvod.com/live.php?id=eltayingju_twn&token=7e1521237615308e32c4e46
 
 #EXTINF:-1 group-title="台湾频道",爱尔达综合台
 https://live.catvod.com/live.php?id=eltazonghe_twn&token=08f272aa8106265aad7ae723ae9408fe01709fd5c3ae9bb2f2e7882e066c210d%3A1762677379%3AMTg1LjIyMC4yMzYuNA%3D%3D
-#EXTINF:-1 group-title="台湾频道",龙华電影
+#EXTINF:-1 group-title="台湾频道",電影TV
 https://raw.githubusercontent.com/15682116618/litv-movie-hd-auto/refs/heads/main/m3u-files/%E9%BE%8D%E8%8F%AF%E9%9B%BB%E5%BD%B1.m3u
-#EXTINF:-1 group-title="台湾频道",龍華經典
+#EXTINF:-1 group-title="台湾频道",經典TV
 https://raw.githubusercontent.com/15682116618/litv-movie-hd-auto/refs/heads/main/m3u-files/%E9%BE%8D%E8%8F%AF%E7%B6%93%E5%85%B8.m3u
-#EXTINF:-1 group-title="台湾频道",龍華戲劇
+#EXTINF:-1 group-title="台湾频道",戲劇TV
 https://raw.githubusercontent.com/15682116618/litv-movie-hd-auto/refs/heads/main/m3u-files/%E9%BE%8D%E8%8F%AF%E6%88%B2%E5%8A%87.m3u
-#EXTINF:-1 group-title="台湾频道",龍華偶像
+#EXTINF:-1 group-title="台湾频道",偶像TV
 https://raw.githubusercontent.com/15682116618/litv-movie-hd-auto/refs/heads/main/m3u-files/%E9%BE%8D%E8%8F%AF%E5%81%B6%E5%83%8F.m3u
 
 #EXTINF:-1 group-title="台湾频道",亚洲旅游台
