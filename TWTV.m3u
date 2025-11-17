@@ -477,6 +477,12 @@ https://live.catvod.com/live.php?id=hbohd_twn&token=e2d1375fa2f517b6f1ecdef09d0f
 https://live.catvod.com/live.php?id=hbohit_twn&token=d8b0c804ed1eee7dd58d5ef4ce9eb4ab71d7a61893ea5a3f3e2af11a08fb3ae6%3A1762677379%3AMTg1LjIyMC4yMzYuNA%3D%3D
 #EXTINF:-1 tvg-id="星空国际" tvg-name="星空国际" group-title="电影频道",星空国际
 http://iot-mqqt.111yao.cn:8080/live/diyp_starmovies.m3u8
+#EXTINF:-1 group-title="电影频道",台灣戲劇台
+http://152.32.229.52:5050/litv-longturn22/index.m3u8?proxy=true
+#EXTINF:-1 group-title="电影频道",風采戲劇台
+http://152.32.229.52:5050/ofiii1048/index.m3u8?proxy=true
+#EXTINF:-1 group-title="电影频道",公視金獎台
+http://152.32.229.52:5050/ofiii13/index.m3u8?proxy=true
 
 
 #==================================================
