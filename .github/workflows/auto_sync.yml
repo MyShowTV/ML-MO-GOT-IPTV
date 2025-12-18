@@ -1,113 +1,57 @@
-name: 🚀 Auto Sync Longhua Assets
+name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    # 每天凌晨3点（北京时间）自动运行
-    - cron: '0 19 * * *'
+    # 每天凌晨3点运行（UTC时间）
+    - cron: '0 19 * * *'  # 北京时间第二天凌晨3点
   workflow_dispatch:       # 支持手动触发
   push:
-    branches: [ main, master ]
+    branches: [ main ]
     paths:
       - 'cloud_sync.py'
-      - '.github/workflows/auto_sync.yml'
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.9'
   CLASH_VERSION: 'v1.18.0'
-  MAX_RETRIES: 3
-  RETRY_DELAY: 5
 
 jobs:
   sync-longhua:
-    runs-on: ubuntu-latest-8core  # 使用8核心实例加快速度
-    timeout-minutes: 30  # 设置超时防止卡死
+    # 使用标准的 GitHub-hosted runner，避免自定义标签导致的等待
+    runs-on: ubuntu-latest
     
     steps:
-      - name: 🔄 Checkout Repository
+      - name: 🧩 Checkout Code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1
-          submodules: false
           persist-credentials: true
 
-      - name: 📦 Setup Python Environment
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'  # 启用pip缓存加速
-          cache-dependency-path: '**/requirements.txt'
 
-      - name: 📥 Install System Dependencies
+      - name: 📦 Install Dependencies
         run: |
-          echo "安装系统依赖..."
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            jq wget curl unzip \
-            chromium-chromedriver \
-            ca-certificates \
-            gnupg lsb-release
-          
-          # 清理APT缓存减少镜像大小
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
+          sudo apt-get update
+          sudo apt-get install -y jq wget curl unzip
+          pip install --upgrade pip
+          pip install selenium==4.9.1 requests==2.31.0
 
-      - name: 📦 Install Python Packages
+      - name: 🚀 Setup Clash Proxy
         run: |
-          echo "安装Python包..."
-          python -m pip install --upgrade pip setuptools wheel
-          
-          # 检查是否有requirements.txt，否则安装默认包
-          if [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt
-          else
-            pip install \
-              selenium==4.19.0 \
-              selenium-wire==5.1.0 \
-              requests==2.31.0 \
-              beautifulsoup4==4.12.3 \
-              lxml==5.2.1 \
-              python-dotenv==1.0.0 \
-              retrying==1.3.4
-          fi
-          
-          # 验证安装
-          python -c "import selenium, requests; print(f'✅ Selenium {selenium.__version__}, Requests {requests.__version__}')"
-
-      - name: 🚀 Setup and Test Proxy Connection
-        id: proxy-setup
-        run: |
-          set -e  # 任何步骤失败即停止
-          
-          echo "🔄 下载Clash代理..."
-          CLASH_URL="https://github.com/Dreamacro/clash/releases/download/${CLASH_VERSION}/clash-linux-amd64-${CLASH_VERSION}.gz"
-          echo "下载地址: $CLASH_URL"
-          
-          # 带重试的下载
-          for i in $(seq 1 $MAX_RETRIES); do
-            if wget -q "$CLASH_URL" -O clash.gz; then
-              echo "✅ 下载成功 (尝试 $i)"
-              break
-            elif [ $i -eq $MAX_RETRIES ]; then
-              echo "❌ 下载失败，达到最大重试次数"
-              exit 1
-            else
-              echo "⚠️ 下载失败，${RETRY_DELAY}秒后重试..."
-              sleep $RETRY_DELAY
-            fi
-          done
-          
-          gunzip -f clash.gz || { echo "解压失败"; exit 1; }
+          # 下载 Clash
+          wget -q "https://github.com/Dreamacro/clash/releases/download/${CLASH_VERSION}/clash-linux-amd64-${CLASH_VERSION}.gz"
+          gunzip "clash-linux-amd64-${CLASH_VERSION}.gz"
+          mv "clash-linux-amd64-${CLASH_VERSION}" clash
           chmod +x clash
           
-          echo "📝 创建代理配置..."
-          cat > clash_config.yaml <<EOF
+          # 创建代理配置文件（台湾节点）
+          cat > clash_config.yaml <<'EOF'
           mixed-port: 7890
-          external-controller: 127.0.0.1:9090
           allow-lan: false
           mode: global
           log-level: info
-          ipv6: false
           
           proxies:
             - name: "TW-01"
@@ -117,268 +61,126 @@ jobs:
               cipher: aes-256-gcm
               password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
               udp: false
+            
+            - name: "TW-02"
+              type: ss
+              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
+              port: 17002
+              cipher: aes-256-gcm
+              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+              udp: false
+            
+            - name: "TW-03"
+              type: ss
+              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
+              port: 17003
+              cipher: aes-256-gcm
+              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+              udp: false
           
           proxy-groups:
             - name: "PROXY"
               type: select
               proxies:
                 - TW-01
+                - TW-02
+                - TW-03
           
           rules:
             - MATCH,PROXY
           EOF
           
-          echo "🚀 启动Clash代理..."
-          nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
+          # 启动 Clash
+          ./clash -f clash_config.yaml > clash.log 2>&1 &
           CLASH_PID=$!
-          echo "Clash PID: $CLASH_PID"
-          echo "CLASH_PID=$CLASH_PID" >> $GITHUB_ENV
-          
-          # 等待代理启动
-          echo "⏳ 等待代理服务启动..."
           sleep 10
           
-          # 检查进程是否存活
-          if ! ps -p $CLASH_PID > /dev/null; then
-            echo "❌ Clash进程已退出"
-            cat clash.log 2>/dev/null || echo "无日志文件"
-            exit 1
-          fi
-          
-          echo "🔍 测试代理连接..."
-          # 测试多个端点以确保代理稳定
-          TEST_ENDPOINTS=(
-            "http://ip-api.com/json"
-            "https://api.ipify.org?format=json"
-            "https://ifconfig.me/all.json"
-          )
-          
-          SUCCESS=false
-          for endpoint in "${TEST_ENDPOINTS[@]}"; do
-            echo "测试端点: $endpoint"
-            RESPONSE=$(curl -s --max-time 15 -x http://127.0.0.1:7890 "$endpoint" || echo '{}')
+          # 验证代理连接
+          echo "测试代理连接..."
+          for i in {1..3}; do
+            RESPONSE=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERROR"}')
+            COUNTRY=$(echo $RESPONSE | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
             
-            if echo "$RESPONSE" | grep -q '"countryCode":"TW"\|"country":"Taiwan"\|"Taiwan"'; then
-              IP=$(echo "$RESPONSE" | grep -o '"query":"[^"]*"\|"ip":"[^"]*"' | head -1 | cut -d'"' -f4)
-              echo "✅ 代理测试成功 | IP: ${IP:-未知} | 国家: 台湾"
-              echo "PROXY_IP=${IP:-未知}" >> $GITHUB_ENV
-              SUCCESS=true
+            if [[ "$COUNTRY" == "TW" ]]; then
+              IP=$(echo $RESPONSE | jq -r '.query')
+              echo "✅ 代理连接成功 | IP: $IP | 国家: 台湾"
+              echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
               break
+            else
+              echo "尝试 $i: 代理连接失败 ($COUNTRY)"
+              sleep 2
             fi
-            sleep 2
           done
           
-          if [ "$SUCCESS" = false ]; then
-            echo "❌ 所有代理测试失败"
-            echo "代理日志:"
-            tail -50 clash.log 2>/dev/null || echo "无法读取日志"
+          if [[ "$PROXY_SUCCESS" != "true" ]]; then
+            echo "❌ 代理连接失败"
             kill $CLASH_PID 2>/dev/null || true
             exit 1
           fi
 
-      - name: 🔄 Execute Sync Script
+      - name: 🔄 Run Sync Script
         env:
           HTTP_PROXY: "http://127.0.0.1:7890"
           HTTPS_PROXY: "http://127.0.0.1:7890"
-          NO_PROXY: "localhost,127.0.0.1"
-          GITHUB_ACTIONS: "true"
         run: |
-          echo "⚙️ 设置代理环境变量..."
+          echo "设置代理环境..."
           export http_proxy="http://127.0.0.1:7890"
           export https_proxy="http://127.0.0.1:7890"
-          export no_proxy="localhost,127.0.0.1"
           
-          echo "🌐 网络环境验证..."
-          echo "代理IP: ${{ env.PROXY_IP }}"
-          curl -s http://ip-api.com/json | jq -r '"出口IP: " + .query + " | 国家: " + .countryCode' || echo "网络测试失败"
+          echo "验证网络环境..."
+          curl -s http://ip-api.com/json/ | jq '.countryCode + " - " + .query'
           
-          echo "📁 当前目录内容:"
-          ls -la
+          echo "开始执行同步脚本..."
+          python cloud_sync.py
           
-          echo "🚀 开始执行同步脚本..."
-          START_TIME=$(date +%s)
-          
-          # 执行Python脚本，带超时和重试
-          for attempt in $(seq 1 $MAX_RETRIES); do
-            echo "尝试 $attempt/$MAX_RETRIES"
-            
-            if timeout 300 python cloud_sync.py 2>&1 | tee sync_output.log; then
-              SYNC_EXIT_CODE=${PIPESTATUS[0]}
-              
-              if [ $SYNC_EXIT_CODE -eq 0 ]; then
-                END_TIME=$(date +%s)
-                DURATION=$((END_TIME - START_TIME))
-                echo "✅ 同步脚本执行成功 | 耗时: ${DURATION}秒"
-                
-                # 检查是否生成了结果文件
-                if ls longhua_assets_*.json 1>/dev/null 2>&1; then
-                  RESULT_FILE=$(ls -t longhua_assets_*.json | head -1)
-                  echo "📄 结果文件: $RESULT_FILE"
-                  echo "RESULT_FILE=$RESULT_FILE" >> $GITHUB_ENV
-                  
-                  # 简单分析结果
-                  SUCCESS_COUNT=$(jq '[.channels[] | select(.key != "这里填钥匙")] | length' "$RESULT_FILE" 2>/dev/null || echo "0")
-                  echo "🎯 成功抓取频道数: $SUCCESS_COUNT"
-                  echo "SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
-                fi
-                break
-              else
-                echo "⚠️ 同步脚本退出码: $SYNC_EXIT_CODE"
-              fi
-            else
-              echo "⚠️ 同步脚本执行超时"
-            fi
-            
-            if [ $attempt -lt $MAX_RETRIES ]; then
-              echo "等待 ${RETRY_DELAY}秒后重试..."
-              sleep $RETRY_DELAY
-            else
-              echo "❌ 达到最大重试次数，同步失败"
-              exit 1
-            fi
-          done
-
-      - name: 📤 Commit and Push Updates
-        if: success() && env.SUCCESS_COUNT != '0'
-        run: |
-          echo "📝 准备提交更新..."
-          
-          # 配置Git
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git config --global pull.rebase false
-          
-          # 拉取最新更改避免冲突
-          echo "拉取远程最新更改..."
-          git pull origin ${{ github.ref_name }} || echo "拉取失败（可能是首次提交）"
-          
-          # 检查哪些文件需要提交
-          echo "检查变更文件..."
-          CHANGED_FILES=$(git status --porcelain)
-          
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "📭 没有检测到文件变更"
-            exit 0
-          fi
-          
-          echo "检测到变更的文件:"
-          echo "$CHANGED_FILES"
-          
-          # 添加所有变更
-          git add -A
-          
-          # 生成有意义的提交信息
-          COMMIT_TIME=$(date +"%Y-%m-%d %H:%M:%S")
-          COMMIT_MSG="🔄 Auto Sync Longhua Assets [$COMMIT_TIME]
-          
-          成功更新 ${{ env.SUCCESS_COUNT }}/7 个频道
-          
-          自动同步完成:
-          - 代理IP: ${{ env.PROXY_IP }}
-          - 结果文件: ${{ env.RESULT_FILE }}
-          - 工作流: ${{ github.run_id }}
-          
-          This commit was created automatically by GitHub Actions."
-          
-          echo "提交信息:"
-          echo "$COMMIT_MSG"
-          
-          # 提交并推送
-          if git commit -m "$COMMIT_MSG"; then
-            echo "✅ 提交成功"
-            
-            # 带重试的推送
-            for i in $(seq 1 3); do
-              if git push origin ${{ github.ref_name }}; then
-                echo "✅ 推送成功 (尝试 $i)"
-                echo "🔄 同步完成！变更已提交到仓库。"
-                break
-              else
-                echo "⚠️ 推送失败 (尝试 $i)"
-                if [ $i -lt 3 ]; then
-                  echo "等待5秒后重试..."
-                  sleep 5
-                  git pull origin ${{ github.ref_name }} --rebase
-                else
-                  echo "❌ 推送失败，达到最大重试次数"
-                  exit 1
-                fi
-              fi
-            done
+          if [[ $? -eq 0 ]]; then
+            echo "✅ 同步脚本执行成功"
           else
-            echo "❌ 提交失败"
+            echo "❌ 同步脚本执行失败"
             exit 1
           fi
 
-      - name: 📊 Upload Artifacts on Failure
-        if: failure() && steps.proxy-setup.outcome == 'success'
+      - name: 📤 Commit Updates
+        if: success()
+        run: |
+          echo "检查文件变更..."
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # 检查是否有 JSON 结果文件
+          if ls longhua_assets_*.json 1> /dev/null 2>&1; then
+            echo "发现新的 AssetID 文件"
+            git add longhua_assets_*.json
+          fi
+          
+          # 检查 workers.js 是否被更新
+          if [[ -n $(git diff --name-only HEAD workers.js 2>/dev/null) ]]; then
+            echo "workers.js 已被更新"
+            git add workers.js
+          fi
+          
+          if [[ -n $(git status --porcelain) ]]; then
+            git commit -m "🔄 Auto Sync Longhua Assets [$(date +'%Y-%m-%d %H:%M:%S')]"
+            git push
+            echo "📤 已提交更新"
+          else
+            echo "📭 没有需要更新的内容"
+          fi
+
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          echo "清理进程..."
+          pkill -f clash 2>/dev/null || true
+          
+          echo "工作流执行完成"
+
+      - name: 📊 Upload Logs on Failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          name: error-logs-${{ github.run_id }}
           path: |
             clash.log
-            sync_output.log
-            longhua_assets_*.json
-            workers.js
-            workers.js.backup.*
-          retention-days: 7
-          if-no-files-found: warn
-          compression-level: 9
-
-      - name: 📋 Upload Summary Artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: workflow-summary-${{ github.run_id }}
-          path: |
-            sync_output.log
-            longhua_assets_*.json
-          retention-days: 14
-          if-no-files-found: ignore
-
-      - name: 🧹 Cleanup Resources
-        if: always()
-        run: |
-          echo "🧹 清理资源..."
-          
-          # 停止Clash代理
-          if [ -n "$CLASH_PID" ] && ps -p $CLASH_PID > /dev/null; then
-            echo "停止Clash进程 (PID: $CLASH_PID)"
-            kill $CLASH_PID 2>/dev/null || true
-            sleep 2
-          fi
-          
-          # 清理临时文件
-          echo "清理临时文件..."
-          rm -f clash clash.gz clash_config.yaml 2>/dev/null || true
-          
-          # 显示磁盘使用情况
-          echo "磁盘使用情况:"
-          df -h . | head -2
-          
-          echo "清理完成"
-
-      - name: 📈 Workflow Status Summary
-        if: always()
-        run: |
-          echo "========================================"
-          echo "         工作流执行摘要"
-          echo "========================================"
-          echo "工作流ID: ${{ github.run_id }}"
-          echo "尝试次数: ${{ github.run_attempt }}"
-          echo "触发器: ${{ github.event_name }}"
-          echo "分支: ${{ github.ref_name }}"
-          echo "提交: ${{ github.sha }}"
-          echo "执行时间: $(date)"
-          
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ 状态: 成功"
-            echo "成功同步频道数: ${{ env.SUCCESS_COUNT }}/7"
-            echo "结果文件: ${{ env.RESULT_FILE }}"
-            echo "代理IP: ${{ env.PROXY_IP }}"
-          else
-            echo "❌ 状态: 失败"
-            echo "请查看错误日志和上传的调试文件"
-          fi
-          
-          echo "========================================"
+            sync.log
+          retention-days: 3
