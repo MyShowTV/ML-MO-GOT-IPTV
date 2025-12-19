@@ -2,7 +2,8 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    - cron: '0 19 * * *'   # 每天北京时间凌晨3点运行
+    # 每天凌晨3点执行（UTC 时间 19:00 = 北京时间 03:00）
+    - cron: '0 19 * * *'
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -11,17 +12,15 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
-  MIHOMO_VERSION: 'v1.18.9'
+  CLASH_VERSION: 'v1.18.9'
 
 jobs:
   sync-longhua:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout Repository
+      - name: 🧩 Checkout Code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -30,126 +29,90 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget curl jq unzip
-          pip install --upgrade pip
-          pip install selenium==4.9.1 requests==2.31.0 selenium-wire==5.1.0 chromedriver-autoinstaller blinker==1.7.0
+          sudo apt-get update -y
+          sudo apt-get install -y jq wget curl unzip
+          python -m pip install --upgrade pip
+          pip install requests==2.31.0 selenium==4.9.1
 
-      - name: 🚀 Setup Mihomo Proxy (Auto Detect)
+      - name: ⚙️ Setup Mihomo Proxy (Auto Port Selection)
         run: |
-          echo "=== [阶段1] 下载 Mihomo 内核 ==="
-          wget -q "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
-          gunzip "mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
-          mv "mihomo-linux-amd64-${MIHOMO_VERSION}" mihomo
+          echo "=== [阶段1] 下载 Mihomo 核心 ==="
+          wget -q https://github.com/MetaCubeX/Mihomo/releases/download/v${{ env.CLASH_VERSION }}/mihomo-linux-amd64-v${{ env.CLASH_VERSION }}.gz || wget -q https://github.com/MetaCubeX/Mihomo/releases/latest/download/mihomo-linux-amd64.gz
+          gunzip -f mihomo-linux-amd64*.gz || true
+          mv mihomo-linux-amd64* mihomo
           chmod +x mihomo
-          echo "✅ 下载完成"
 
-          echo "=== [阶段2] 自动探测可用台湾节点端口 ==="
-          SUCCESS=false
+          echo "=== [阶段2] 自动选择可用端口 ==="
           for PORT in $(seq 17001 17010); do
-            echo "尝试节点端口: $PORT"
-            cat > config.yaml <<EOF
+            cat <<EOF > config.yaml
 mixed-port: 7890
 allow-lan: true
 mode: global
 log-level: info
 proxies:
-  - name: "TW"
+  - name: "TW-${PORT}"
     type: ss
     server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-    port: $PORT
+    port: ${PORT}
     cipher: aes-256-gcm
     password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
     udp: false
-proxy-groups:
-  - name: "PROXY"
-    type: select
-    proxies:
-      - TW
-rules:
-  - MATCH,PROXY
 EOF
-            ./mihomo -f config.yaml > mihomo.log 2>&1 &
-            sleep 12
 
-            IP_INFO=$(curl -s --max-time 8 -x http://127.0.0.1:7890 http://ip-api.com/json/?fields=country,countryCode,query || echo '{"countryCode":"ERROR"}')
-            COUNTRY=$(echo "$IP_INFO" | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
-
-            if [[ "$COUNTRY" == "TW" ]]; then
-              echo "✅ 台湾节点成功连接：$(echo "$IP_INFO" | jq -r '.query')"
-              echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
-              echo "MIHOMO_PID=$(pgrep -f mihomo)" >> $GITHUB_ENV
-              SUCCESS=true
+            nohup ./mihomo -f config.yaml > mihomo.log 2>&1 &
+            sleep 15
+            IP=$(curl -s --max-time 10 -x http://127.0.0.1:7890 https://ifconfig.me || echo "fail")
+            if [[ "$IP" != "fail" && "$IP" != 20.* && "$IP" != 52.* ]]; then
+              echo "✅ 已成功连接代理节点: $IP (端口 $PORT)"
+              echo "USE_PROXY=true" >> $GITHUB_ENV
               break
             else
-              echo "❌ 节点端口 $PORT 无法连接台湾，重试下一个..."
-              pkill -f mihomo
+              echo "❌ 端口 $PORT 不通，重试下一个..."
+              pkill -f mihomo || true
               sleep 3
             fi
           done
 
-          if [[ "$SUCCESS" == false ]]; then
-            echo "❌ 所有端口均连接失败，使用直连模式运行"
-            echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
+          if [[ -z "$USE_PROXY" ]]; then
+            echo "⚠️ 无法建立代理连接，进入直连模式"
+            echo "USE_PROXY=false" >> $GITHUB_ENV
           fi
 
-      - name: 🌏 Verify Proxy IP
-        if: env.PROXY_SUCCESS == 'true'
+      - name: 🔄 Run Sync Script
         run: |
-          echo "=== 验证代理出口 ==="
-          curl -x http://127.0.0.1:7890 -s http://ip-api.com/json/?fields=country,query | jq
+          echo "=== [阶段3] 启动同步脚本 ==="
 
-      - name: 🧠 Run Sync Script
-        run: |
-          echo "=== [阶段5] 启动同步脚本 ==="
-          if [ "${PROXY_SUCCESS}" == "true" ]; then
-            echo "✅ 使用代理运行 cloud_sync.py ..."
+          if [[ "$USE_PROXY" == "true" ]]; then
             export http_proxy="http://127.0.0.1:7890"
             export https_proxy="http://127.0.0.1:7890"
-            export HTTP_PROXY="http://127.0.0.1:7890"
-            export HTTPS_PROXY="http://127.0.0.1:7890"
+            echo "✅ 代理模式启用中..."
           else
-            echo "⚠️ 当前为直连模式运行，可能无法访问龙华频道"
+            echo "⚠️ 当前为直连模式运行，可能无法访问台湾资源"
           fi
 
-          python cloud_sync.py
-          EXIT_CODE=$?
-          if [[ $EXIT_CODE -ne 0 ]]; then
-            echo "❌ 同步脚本执行失败（退出码 $EXIT_CODE）"
-            exit $EXIT_CODE
-          else
-            echo "✅ 同步脚本执行成功"
-          fi
+          echo "开始执行 cloud_sync.py ..."
+          python cloud_sync.py || echo "❌ 脚本执行异常"
 
-      - name: 📤 Commit Updates
-        if: success()
+      - name: 📤 Commit & Push Updates
+        if: always()
         run: |
-          echo "=== 提交更新 ==="
-          git config --local user.name "github-actions[bot]"
+          echo "=== [阶段4] 提交变更 ==="
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
-          if git diff --quiet; then
-            echo "📭 没有文件变更"
-          else
+          git config --local user.name "github-actions[bot]"
+          
+          if [[ -n "$(git status --porcelain)" ]]; then
             git add .
-            git commit -m "🔄 Auto Sync Longhua Assets ($(date '+%Y-%m-%d %H:%M:%S'))"
+            git commit -m "🔄 Auto Sync Longhua Assets ($(date +'%Y-%m-%d %H:%M:%S'))"
             git push
             echo "✅ 更新已提交"
+          else
+            echo "📭 没有检测到文件变更"
           fi
 
       - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "=== 清理进程与文件 ==="
+          echo "=== [阶段5] 清理进程与临时文件 ==="
           pkill -f mihomo || true
-          rm -f mihomo config.yaml mihomo.log *.tmp *.log 2>/dev/null || true
-
-      - name: 📊 Upload Logs on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-logs-${{ github.run_id }}
-          path: |
-            mihomo.log
-            *.json
-          retention-days: 3
+          rm -f mihomo config.yaml mihomo.log || true
+          echo "✅ 清理完成"
