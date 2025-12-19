@@ -1,40 +1,41 @@
-name: 自动抓取并更新直播源
+name: IPTV Auto Sync
 on:
   schedule:
-    - cron: '0 */6 * * *' # 每6小时自动运行一次
-  workflow_dispatch:      # 支持手动点击运行
+    - cron: '0 */6 * * *' # 每6小时运行一次
+  workflow_dispatch:      # 支持手动运行
 
 jobs:
-  build:
+  update-source:
     runs-on: ubuntu-latest
     permissions:
       contents: write     # 必须开启写入权限
     
     steps:
-      - name: 检出代码
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: 安装 Chrome 浏览器
+      - name: Install Chrome
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: 设置 Python 3.9
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装依赖包
+      - name: Install Dependencies
         run: |
+          pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 运行同步脚本
+      - name: Run Sync Script
         run: python cloud_sync.py
 
-      - name: 提交并推送更改
+      - name: Push Changes
         run: |
           git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "github-actions[bot]"
           git add workers.js
-          git commit -m "自动更新钥匙: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Update Keys: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
