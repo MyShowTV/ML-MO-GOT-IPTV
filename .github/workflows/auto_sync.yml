@@ -1,7 +1,7 @@
 name: IPTV Auto Capture
 on:
   schedule:
-    - cron: '0 */4 * * *' # 每4小时自动抓一次
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,13 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: 启动 Clash 隧道
+      - name: 启动 Mihomo (Clash Meta) 隧道
         run: |
-          wget https://github.com/Dreamacro/clash/releases/download/v1.18.0/clash-linux-amd64-v1.18.0.gz
-          gunzip clash-linux-amd64-v1.18.0.gz
-          chmod +x clash-linux-amd64-v1.18.0
-          ./clash-linux-amd64-v1.18.0 -f clash_config.yaml & 
-          sleep 8 # 给 Clash 足够的时间建立节点连接
+          # 下载 Mihomo (原 Clash Meta)
+          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
+          gunzip mihomo-linux-amd64-v1.18.9.gz
+          mv mihomo-linux-amd64-v1.18.9 mihomo
+          chmod +x mihomo
+          # 后台启动并加载配置
+          ./mihomo -f clash_config.yaml & 
+          sleep 10 # 增加等待时间确保握手完成
 
       - name: 安装 Chrome 和依赖
         run: |
@@ -26,7 +29,7 @@ jobs:
           sudo apt-get install -y google-chrome-stable
           pip install "blinker<1.8.0" selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller requests
 
-      - name: 执行抓取脚本
+      - name: 执行深度抓取脚本
         run: python cloud_sync.py
 
       - name: 推送更新到仓库
@@ -34,5 +37,5 @@ jobs:
           git config --local user.email "actions@github.com"
           git config --local user.name "github-actions[bot]"
           git add workers.js
-          git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Auto Update Key: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
