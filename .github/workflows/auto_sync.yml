@@ -1,17 +1,40 @@
-- name: 安装 Chrome 浏览器
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
+name: 自动抓取并更新直播源
+on:
+  schedule:
+    - cron: '0 */6 * * *' # 每6小时自动运行一次
+  workflow_dispatch:      # 支持手动点击运行
 
-    - name: 设置 Python 并安装依赖
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # 必须开启写入权限
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
 
-    - name: 一键安装 requirements.txt 依赖
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: 安装 Chrome 浏览器
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
 
-    - name: 运行抓取脚本
-      run: python iptv_main.py
+      - name: 设置 Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安装依赖包
+        run: |
+          pip install -r requirements.txt
+
+      - name: 运行同步脚本
+        run: python cloud_sync.py
+
+      - name: 提交并推送更改
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Action"
+          git add workers.js
+          git commit -m "自动更新钥匙: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git push
