@@ -22,34 +22,24 @@ jobs:
       - name: 📦 安装依赖
         run: pip install requests
 
-      - name: 🚀 启动代理 (增强稳定性版)
+      - name: 🚀 启动代理
         run: |
           wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
           gunzip -f mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 clash
           chmod +x clash
-          
-          # 启动并在后台运行
+          # 启动 Clash，不检查结果，直接进入下一步
           nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
-          
-          echo "等待代理初始化 (30秒)..."
-          sleep 30
-          
-          # 简单的连通性测试，不再强制要求必须含 "TW" 字符串
-          echo "=== 代理测试结果 ==="
-          curl -I -s -x http://127.0.0.1:7890 https://www.google.com || echo "⚠️ 代理可能未完全就绪"
-          
-      - name: 🔄 执行同步 (强制环境变量)
+          echo "等待 20 秒让隧道建立..."
+          sleep 20
+
+      - name: 🔄 执行同步
         env:
-          # 同时设置大写和小写，确保 Python requests 必走代理
-          http_proxy: http://127.0.0.1:7890
-          https_proxy: http://127.0.0.1:7890
+          # 告诉 Python 系统：所有请求去 7890 端口
           HTTP_PROXY: http://127.0.0.1:7890
           HTTPS_PROXY: http://127.0.0.1:7890
         run: |
-          # 如果脚本还是抓不到，至少打印出当时的 IP 信息方便排查
-          echo "当前执行脚本的出口 IP 简报:"
-          curl -s -x http://127.0.0.1:7890 http://ip-api.com/json/ || echo "无法获取IP信息"
+          echo "--- 开始执行同步脚本 ---"
           python cloud_sync.py
 
       - name: 📤 提交更新
@@ -58,5 +48,13 @@ jobs:
           git config --local user.email "actions@github.com"
           git config --local user.name "Github Action"
           git add workers.js
-          git commit -m "🔄 自动同步钥匙 [$(date +'%Y-%m-%d %H:%M')]" || exit 0
+          git commit -m "更新钥匙 $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
+
+      - name: 📊 报错排查 (仅失败时运行)
+        if: failure()
+        run: |
+          echo "--- Clash 运行日志 ---"
+          tail -n 20 clash.log
+          echo "--- 网络连通性测试 ---"
+          curl -I -x http://127.0.0.1:7890 https://www.google.com || echo "完全连不通代理"
