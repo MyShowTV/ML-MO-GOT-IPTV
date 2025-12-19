@@ -2,8 +2,8 @@ name: 龙华频道 AssetID 自动同步
 
 on:
   schedule:
-    - cron: '0 0,12 * * *'
-  workflow_dispatch:
+    - cron: '0 0,12 * * *' # 每天北京时间 08:00 和 20:00 运行
+  workflow_dispatch:      # 允许手动触发
 
 jobs:
   sync:
@@ -18,43 +18,48 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装依赖
+      - name: 安装基础依赖
         run: |
           pip install selenium webdriver-manager
           sudo apt-get update
           sudo apt-get install -y shadowsocks-libev
 
-      - name: 启动 Shadowsocks 隧道
+      - name: 开启 Shadowsocks 隧道
         run: |
-          # 启动后台进程
+          # 启动后台 shadowsocks-local
+          # 请确保 Secrets 中已配置 SS_PASSWORD
           ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 &
           
-          echo "等待隧道建立并测试连接..."
-          # 循环测试，直到代理真正可用
+          echo "等待隧道建立并测试台湾 IP..."
           for i in {1..10}; do
             if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
-              echo "✅ Shadowsocks 隧道已就绪"
-              break
+              echo "✅ 代理连接成功"
+              # 可选：打印当前 IP 归属地
+              curl -x socks5://127.0.0.1:10808 ifconfig.me
+              exit 0
             fi
             echo "尝试中 ($i/10)..."
             sleep 5
           done
+          echo "❌ 代理连接失败"
+          exit 1
 
-      - name: 执行抓取
+      - name: 运行同步脚本
         env:
-          # 这里的变量会被 Python 脚本中的 setup_driver 读取
           HTTPS_PROXY: http://127.0.0.1:10808
           HTTP_PROXY: http://127.0.0.1:10808
+          # 核心修正：防止 Selenium 内部通讯走代理
+          NO_PROXY: localhost,127.0.0.1
         run: python longhua_sync.py
 
-      - name: 推送更新
+      - name: 提交更改
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           if [[ -n "$(git status --porcelain workers.js)" ]]; then
             git add workers.js
-            git commit -m "🤖 自动更新 [$(date '+%Y-%m-%d %H:%M')]"
+            git commit -m "🤖 自动同步 AssetID [$(date '+%Y-%m-%d %H:%M')]"
             git push
           else
-            echo "无变动"
+            echo "无数据变动"
           fi
