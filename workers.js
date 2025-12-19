@@ -3,7 +3,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/|\.m3u8$/gi, "").toLowerCase();
 
-    // 频道列表配置（Python 会自动替换这里的 key）
+    // 频道列表 (Python 脚本会自动替换这里的 key 内容)
     const config = {
       "lhtv01": { name: "龙华电影", key: "LQdetS7vEBE" },
       "lhtv02": { name: "龙华经典", key: "LQdetS7vEBE" },
@@ -27,7 +27,7 @@ export default {
         }
       });
 
-      let text = await response.text();
+      const text = await response.text();
       const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
       
       const fixedText = text.split('\n').map(line => {
@@ -38,10 +38,7 @@ export default {
       }).join('\n');
 
       return new Response(fixedText, {
-        headers: { 
-            "Content-Type": "application/vnd.apple.mpegurl", 
-            "Access-Control-Allow-Origin": "*" 
-        }
+        headers: { "Content-Type": "application/vnd.apple.mpegurl", "Access-Control-Allow-Origin": "*" }
       });
     } catch (e) {
       return new Response("Error: " + e.message, { status: 500 });
