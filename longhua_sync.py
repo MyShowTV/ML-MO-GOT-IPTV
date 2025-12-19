@@ -74,41 +74,58 @@ class LonghuaCrawler:
         try:
             url = f"{self.base_url}{slug}"
             driver.get(url)
-            # 增加等待时间，确保页面渲染完成
+            
+            # 等待时间加长至 15 秒，确保异步脚本执行完毕
             time.sleep(15) 
             
-            # --- 诊断：打印页面标题和部分源码 ---
-            title = driver.title
-            logger.info(f"页面标题: {title}")
-            
-            # 方案 A: 通过执行 JS 获取 Nuxt 内部变量 (最稳健)
-            # 尝试多种可能的路径
+            # 打印当前标题，帮助排查是否被防火墙拦截
+            logger.info(f"正在读取页面: {driver.title}")
+
+            # --- 策略 A: 深度 JS 变量提取 ---
+            # 遍历所有可能的 Nuxt 数据路径
             asset_id = driver.execute_script("""
                 try {
-                    // 路径 1
-                    if (window.__NUXT__ && window.__NUXT__.data[0].channelInfo) {
-                        return window.__NUXT__.data[0].channelInfo.assetId;
+                    const data = window.__NUXT__;
+                    if (!data) return null;
+                    
+                    // 路径 1: 常见频道信息路径
+                    if (data.data && data.data[0] && data.data[0].channelInfo) {
+                        return data.data[0].channelInfo.assetId;
                     }
-                    // 路径 2
-                    if (window.__NUXT__ && window.__NUXT__.state.channel.current.assetId) {
-                        return window.__NUXT__.state.channel.current.assetId;
+                    // 路径 2: 备选状态路径
+                    if (data.state && data.state.channel && data.state.channel.current) {
+                        return data.state.channel.current.assetId;
                     }
+                    // 路径 3: 暴力搜索整个 data 对象中的 assetId 键
+                    const findKey = (obj, key) => {
+                        if (obj && typeof obj === 'object') {
+                            if (obj.hasOwnProperty(key)) return obj[key];
+                            for (let k in obj) {
+                                let res = findKey(obj[k], key);
+                                if (res) return res;
+                            }
+                        }
+                        return null;
+                    };
+                    return findKey(data, 'assetId');
                 } catch(e) { return null; }
-                return null;
             """)
             
-            # 方案 B: 暴力正则匹配整个源码
+            # --- 策略 B: 增强型正则匹配 ---
             if not asset_id:
                 html = driver.page_source
-                # 匹配格式如 "assetId":"LITV123456"
-                match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']+)["\']', html)
-                if match:
-                    asset_id = match.group(1)
+                # 匹配多种可能的 JSON 键值对格式
+                patterns = [
+                    r'["\']assetId["\']\s*:\s*["\']([^"\']{10,})["\']',
+                    r'["\']asset_id["\']\s*:\s*["\']([^"\']{10,})["\']',
+                    r'playlist/([a-zA-Z0-9_-]{10,})/master\.m3u8'
+                ]
+                for p in patterns:
+                    match = re.search(p, html)
+                    if match:
+                        asset_id = match.group(1)
+                        break
             
-            # 方案 C: 如果还是不行，可能是因为地区限制导致页面没加载出来
-            if not asset_id and "ofiii" not in title.lower():
-                logger.error("警告：页面标题不含 ofiii，可能被防火墙拦截或重定向")
-
             return asset_id
         except Exception as e:
             logger.error(f"抓取 {slug} 异常: {e}")
