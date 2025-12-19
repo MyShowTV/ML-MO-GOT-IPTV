@@ -16,17 +16,13 @@ def get_driver():
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    # 强制伪装成真实浏览器，避免被部分反爬策略拦截
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
-    # 核心修改：明确指定协议为 socks5
-    # GitHub 环境下我们的代理地址是 127.0.0.1:10808
     proxy_addr = "socks5://127.0.0.1:10808"
     options.add_argument(f'--proxy-server={proxy_addr}')
-    
-    # 忽略证书错误（防止代理抓包干扰）
     options.add_argument('--ignore-certificate-errors')
-    options.add_argument('--allow-running-insecure-content')
 
-    # 临时关闭环境变量中的代理，只为了下载驱动
     old_proxy = os.environ.get('HTTPS_PROXY')
     os.environ['HTTPS_PROXY'] = ''
     service = Service(ChromeDriverManager().install())
@@ -36,7 +32,6 @@ def get_driver():
 
 def main():
     driver = get_driver()
-    # 恢复所有频道
     channels = {
         'lhtv01': 'litv-longturn01',
         'lhtv02': 'litv-longturn02',
@@ -50,63 +45,68 @@ def main():
     results = {}
     
     try:
-        # 诊断：确认 IP
-        logger.info("🕵️ 正在确认浏览器出口 IP...")
-        try:
-            driver.get("http://ifconfig.me/ip")
-            time.sleep(3)
-            ip = driver.find_element(By.TAG_NAME, "body").text
-            logger.info(f"🌍 浏览器出口 IP 为: {ip}")
-        except:
-            logger.warning("⚠️ 无法获取 IP，尝试直接抓取...")
+        logger.info(f"🌍 代理确认：{driver.title} (通过 {driver.execute_script('return navigator.userAgent')})")
 
         for cid, slug in channels.items():
-            logger.info(f"🔍 正在抓取: {cid} ({slug})")
+            logger.info(f"🔍 正在抓取: {cid}")
             url = f"https://www.ofiii.com/channel/watch/{slug}"
             
-            try:
-                driver.get(url)
-                time.sleep(15) # 给页面充足的加载时间
-                
-                html = driver.page_source
-                # 提取 AssetID
-                match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']{10,})["\']', html)
-                
+            driver.get(url)
+            # 等待时间稍微错开，模拟人为
+            time.sleep(15) 
+            
+            html = driver.page_source
+            
+            # --- 强化版正则匹配 ---
+            # 兼容多种写法：assetId: "xxx" 或 "assetId":"xxx" 或 asset_id 等
+            patterns = [
+                r'["\']assetId["\']\s*[:=]\s*["\']([^"\']{15,})["\']',
+                r'["\']id["\']\s*[:=]\s*["\'](LITV[^"\']+)["\']', # 针对 ofiii 常见的 LITV 开头的 ID
+                r'assetId\s*=\s*["\']([^"\']+)["\']'
+            ]
+            
+            found_id = None
+            for p in patterns:
+                match = re.search(p, html)
                 if match:
-                    aid = match.group(1)
-                    logger.info(f"✅ 成功获取 ID: {aid}")
-                    results[cid] = aid
-                else:
-                    logger.warning(f"❌ 抓取失败，页面标题: {driver.title}")
-                    
-            except Exception as e:
-                logger.error(f"❌ 发生异常: {e}")
+                    found_id = match.group(1)
+                    break
+            
+            if found_id:
+                logger.info(f"✅ 成功获取 {cid}: {found_id}")
+                results[cid] = found_id
+            else:
+                logger.warning(f"❌ {cid} 抓取失败。")
+                # 记录页面中所有看起来像 ID 的长字符串（仅前两个，用于调试）
+                potential_ids = re.findall(r'LITV[a-zA-Z0-9_-]{5,}', html)
+                if potential_ids:
+                    logger.info(f"📝 发现疑似 ID 候选词: {list(set(potential_ids))[:3]}")
 
         if results:
             update_workers_js(results)
-        else:
-            logger.error("🚫 未抓取到任何有效数据，请检查地区限制")
             
     finally:
         driver.quit()
 
 def update_workers_js(results):
     file_path = "workers.js"
-    if not os.path.exists(file_path):
-        return
-
+    if not os.path.exists(file_path): return
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
-
+    
+    updated_count = 0
     for cid, aid in results.items():
-        # 匹配对应频道的 key 字段并更新
-        pattern = rf'"{cid}":\s*\{{\s*name:\s*"[^"]+",\s*key:\s*"[^"]*"'
-        replacement = f'"{cid}": {{ name: "龙华频道", key: "{aid}"'
-        content = re.sub(pattern, replacement, content)
+        # 更新逻辑：匹配 "lhtv01": { ... key: "旧ID" }
+        pattern = rf'"{cid}":\s*\{{[^{{}}]+key:\s*"[^"]*"'
+        # 保持原来的 name 字段，只替换 key
+        if re.search(pattern, content):
+            new_pattern_content = re.sub(r'key:\s*"[^"]*"', f'key: "{aid}"', re.search(pattern, content).group())
+            content = re.sub(pattern, new_pattern_content, content)
+            updated_count += 1
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
-    logger.info("🎉 workers.js 文件已自动更新并准备提交")
+    logger.info(f"🎉 成功更新了 {updated_count} 个频道的 ID")
 
 if __name__ == "__main__":
     main()
