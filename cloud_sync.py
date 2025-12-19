@@ -1,36 +1,45 @@
 import os, re, time, requests
 
 def get_asset_id(cid, slug):
-    # 这是 Ofiii 频道信息的真实数据接口，setId 就是 slug
+    # 直接请求数据接口，这通常是动态网页获取 ID 的源头
     api_url = f"https://www.ofiii.com/api/content/getSetAndVideoBySetId?setId={slug}"
-    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": f"https://www.ofiii.com/channel/watch/{slug}",
         "Accept": "application/json"
     }
-    # 必须走台湾代理
+    # 必须通过台湾代理
     proxies = { "http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890" }
     
     try:
         res = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
         if res.status_code == 200:
-            data = res.text
-            # 直接在 JSON 返回结果中搜 assetId
-            match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', data)
+            # 在返回的 JSON 中提取 assetId
+            match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', res.text)
             if match:
                 aid = match.group(1)
-                print(f"✅ {cid} 接口抓取成功: {aid}")
+                print(f"✅ {cid} 抓取成功: {aid}")
                 return aid
-            else:
-                print(f"⚠️ {cid} 接口返回成功但未找到 assetId 字段")
-        else:
-            print(f"❌ {cid} API 错误，状态码: {res.status_code}")
-    except Exception as e:
-        print(f"🔥 {cid} 网络异常: {str(e)}")
+    except:
+        pass
+    
+    # 备用方案：如果 API 失败，尝试抓取网页源码中的 Next.js 数据块
+    try:
+        page_url = f"https://www.ofiii.com/channel/watch/{slug}"
+        res = requests.get(page_url, headers=headers, proxies=proxies, timeout=15)
+        match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', res.text)
+        if match:
+            aid = match.group(1)
+            print(f"✅ {cid} 网页抓取成功: {aid}")
+            return aid
+    except:
+        pass
+    
+    print(f"❌ {cid} 所有抓取手段均失效")
     return None
 
 def sync():
+    # 这里的 ID 必须对应 workers.js 里的左侧名称
     channels = {
         'lhtv01': 'litv-longturn03',
         'lhtv03': 'litv-longturn02',
@@ -49,22 +58,21 @@ def sync():
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
-            # 这里的正则要确保能匹配到你 workers.js 的格式
-            pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
+            # 精准替换：匹配 "cid": { ... key: "..." }
+            # 无论你中间有多少空格或换行，都能精准捕捉
+            pattern = rf'"{cid}"\s*:\s*\{{[^}}]+?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 any_updated = True
             else:
-                print(f"❓ {cid} 抓到了 ID 但 workers.js 里没找到对应的 key 行")
+                print(f"⚠️ {cid} 抓到了 ID 但在 workers.js 中匹配不到格式")
 
     if any_updated:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 API 同步成功！")
-    else:
-        print("😭 依然未能更新，请确认 workers.js 里的频道 ID 是否写对。")
+        print("🚀 同步完成！Workers 代码已更新。")
 
 if __name__ == "__main__":
     sync()
