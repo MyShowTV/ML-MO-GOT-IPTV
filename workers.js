@@ -7,13 +7,13 @@ export default {
     // 频道配置表
     // 注意：Python 脚本会自动替换 key: "..." 里的内容，请不要修改这里的结构
     const config = {
-      "lhtv01": { name: "龙华电影", key: "这里填钥匙" },
+      "lhtv01": { name: "", key: "-1lPJzJEZYc" } },
       "lhtv02": { name: "龙华经典", key: "这里填钥匙" },
-      "lhtv03": { name: "龙华戏剧", key: "这里填钥匙" },
+      "lhtv03": { name: "", key: "LQdetS7vEBE" } },
       "lhtv04": { name: "龙华日韩", key: "这里填钥匙" },
-      "lhtv05": { name: "龙华偶像", key: "这里填钥匙" },
-      "lhtv06": { name: "龙华卡通", key: "这里填钥匙" },
-      "lhtv07": { name: "龙华洋片", key: "这里填钥匙" }
+      "lhtv05": { name: "", key: "B8KQyHS-600" } },
+      "lhtv06": { name: "", key: "ZlRqsFWifLk" } },
+      "lhtv07": { name: "", key: "ofiii76_id_here" } }
     };
 
     const ch = config[path];
