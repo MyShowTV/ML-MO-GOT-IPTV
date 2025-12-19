@@ -1,106 +1,99 @@
-import os, re, time
-import chromedriver_autoinstaller
-from seleniumwire import webdriver
+import os
+import re
+import time
+import logging
+from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
-def get_asset_id_advanced(cid, slug):
-    print(f"🔍 正在深度抓取频道: {cid}...")
-    chromedriver_autoinstaller.install()
-    
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def get_driver():
     options = Options()
-    options.add_argument('--headless')
+    options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    options.add_argument('--autoplay-policy=no-user-gesture-required')
+    
+    # 防止 Selenium 内部通信被代理拦截
+    os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 
-    sw_options = {
-        'proxy': {
-            'http': 'http://127.0.0.1:7890',
-            'https': 'http://127.0.0.1:7890',
-        },
-        'connection_timeout': 60
-    }
+    # 临时关闭代理以下载驱动
+    old_proxy = os.environ.get('HTTPS_PROXY')
+    os.environ['HTTPS_PROXY'] = ''
+    service = Service(ChromeDriverManager().install())
+    os.environ['HTTPS_PROXY'] = old_proxy if old_proxy else ''
 
-    driver = None
-    try:
-        driver = webdriver.Chrome(options=options, seleniumwire_options=sw_options)
-        driver.set_page_load_timeout(40)
-        
-        driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
-        time.sleep(12)
+    # 设置浏览器代理
+    if old_proxy:
+        options.add_argument(f'--proxy-server={old_proxy}')
 
-        js_script = """
-            var videos = document.getElementsByTagName('video');
-            for(var i=0; i<videos.length; i++) {
-                videos[i].play();
-            }
-            var evt = document.createEvent("MouseEvents");
-            evt.initMouseEvent("click", true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-            document.dispatchEvent(evt);
-        """
-        driver.execute_script(js_script)
-        
-        for i in range(3):
-            driver.execute_script(f"window.scrollTo(0, {200 * (i+1)});")
-            time.sleep(2)
-
-        print("📡 正在监听网络流量中的 m3u8 请求...")
-        end_time = time.time() + 30
-        while time.time() < end_time:
-            for request in reversed(driver.requests):
-                if 'master.m3u8' in request.url:
-                    match = re.search(r'playlist/([a-zA-Z0-9_-]+)/', request.url)
-                    if match:
-                        aid = match.group(1)
-                        print(f"✅ 【拦截成功】 {cid} ID: {aid}")
-                        return aid
-            time.sleep(4)
-            
-        print(f"❌ {cid} 截获超时：未发现 master.m3u8 请求。")
-    except Exception as e:
-        print(f"🔥 {cid} 运行时异常: {e}")
-    finally:
-        if driver:
-            del driver.requests
-            driver.quit()
-    return None
+    return webdriver.Chrome(service=service, options=options)
 
 def main():
+    driver = get_driver()
+    # 频道映射表
     channels = {
-        'lhtv01': 'litv-longturn03',
-        'lhtv03': 'litv-longturn02',
-        'lhtv05': 'ofiii73',
-        'lhtv06': 'ofiii74',
-        'lhtv07': 'ofiii76',
+        'lhtv01': 'litv-longturn01',
+        'lhtv02': 'litv-longturn02',
+        'lhtv03': 'litv-longturn03',
+        'lhtv04': 'litv-longturn11',
+        'lhtv05': 'litv-longturn12',
+        'lhtv06': 'litv-longturn18',
+        'lhtv07': 'litv-longturn21'
     }
     
-    if not os.path.exists("workers.js"):
-        print("❌ 错误: 找不到 workers.js")
+    results = {}
+    
+    try:
+        for cid, slug in channels.items():
+            logger.info(f"🔍 正在抓取: {cid}")
+            url = f"https://www.ofiii.com/channel/watch/{slug}"
+            
+            try:
+                driver.get(url)
+                time.sleep(10) # 等待页面加载
+                
+                # 使用正则直接从源码提取 AssetID，不需要性能日志
+                html = driver.page_source
+                match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']{10,})["\']', html)
+                
+                if match:
+                    aid = match.group(1)
+                    logger.info(f"✅ 成功: {aid}")
+                    results[cid] = aid
+                else:
+                    logger.warning(f"❌ 失败: 未找到 ID")
+                    
+            except Exception as e:
+                logger.error(f"❌ 错误: {e}")
+
+        # 如果抓到了数据，更新 workers.js
+        if results:
+            update_workers_js(results)
+            
+    finally:
+        driver.quit()
+
+def update_workers_js(results):
+    file_path = "workers.js"
+    if not os.path.exists(file_path):
+        logger.error("找不到 workers.js 文件")
         return
-        
-    with open("workers.js", "r", encoding="utf-8") as f:
+
+    with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    any_updated = False
-    for cid, slug in channels.items():
-        aid = get_asset_id_advanced(cid, slug)
-        if aid:
-            pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-            replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
-            
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                any_updated = True
-        time.sleep(5)
+    for cid, aid in results.items():
+        # 替换 key 字段
+        pattern = rf'"{cid}":\s*\{{\s*name:\s*"[^"]+",\s*key:\s*"[^"]*"'
+        replacement = f'"{cid}": {{ name: "龙华频道", key: "{aid}"'
+        content = re.sub(pattern, replacement, content)
 
-    if any_updated:
-        with open("workers.js", "w", encoding="utf-8") as f:
-            f.write(content)
-        print("🚀 [SUCCESS] 所有抓取到的 ID 已同步至 workers.js")
-    else:
-        print("😭 未能捕获任何有效数据。")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    logger.info("🎉 workers.js 文件更新完成")
 
 if __name__ == "__main__":
     main()
