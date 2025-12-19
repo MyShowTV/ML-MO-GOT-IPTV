@@ -3,73 +3,66 @@ import os, re, time, requests
 def get_asset_id(cid, path):
     url = f"https://www.ofiii.com/{path}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.ofiii.com/"
     }
-    proxies = {
-        "http": os.environ.get("HTTP_PROXY"),
-        "https": os.environ.get("HTTPS_PROXY")
-    }
+    proxies = { "http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890" }
     
     try:
-        res = requests.get(url, headers=headers, proxies=proxies, timeout=20)
-        # 如果 404，尝试去掉 'watch/' 路径再试一次
-        if res.status_code == 404 and 'watch/' in path:
-            new_path = path.replace('watch/', '')
-            return get_asset_id(cid, new_path)
+        res = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        if res.status_code == 200:
+            # 尝试多种可能的匹配模式
+            # 模式 1: 原始路径匹配
+            match = re.search(r"playlist/([a-zA-Z0-9_-]+)/master\.m3u8", res.text)
+            # 模式 2: 如果模式 1 失败，尝试匹配 JSON 数据中的 ID
+            if not match:
+                match = re.search(r"\"assetId\":\"([a-zA-Z0-9_-]+)\"", res.text)
             
-        # 增强版正则：不仅找 m3u8，还直接找 json 中的 assetId
-        patterns = [
-            r"playlist/([a-zA-Z0-9_-]{8,})/master\.m3u8",
-            r'"assetId"\s*:\s*"([^"]+)"',
-            r'asset_id\s*=\s*["\']([^"\']+)["\']'
-        ]
-        
-        for p in patterns:
-            match = re.search(p, res.text)
             if match:
                 aid = match.group(1)
-                print(f"✅ {cid} 抓取成功: {aid}")
+                print(f"✅ {cid} 成功: {aid}")
                 return aid
-        
-        print(f"⚠️ {cid} 无法从页面提取钥匙，状态码: {res.status_code}")
-        return None
+            else:
+                print(f"⚠️ {cid} 页面已打开但未找到 ID (正则失效)")
+        else:
+            print(f"❌ {cid} 错误: {res.status_code} (路径可能变了)")
     except Exception as e:
-        print(f"🔥 {cid} 请求异常: {str(e)}")
-        return None
+        print(f"🔥 {cid} 异常: {str(e)}")
+    return None
 
 def sync():
-    # 更新了最新的官方路径
+    # 重新梳理后的最新路径映射
     channels = {
-    'lhtv01': 'channel/watch/litv-longturn03',
-    'lhtv02': 'channel/watch/litv-longturn05',
-    'lhtv03': 'channel/watch/litv-longturn02',
-    'lhtv04': 'channel/watch/litv-longturn04',
-    'lhtv05': 'channel/watch/litv-longturn01',
-    'lhtv06': 'channel/watch/litv-longturn06',
-    'lhtv07': 'channel/watch/litv-longturn07',
-}
+        'lhtv01': 'channel/watch/litv-longturn03', # 200 - 正确
+        'lhtv02': 'channel/watch/litv-longturn04', # 之前是 404，需尝试新 ID
+        'lhtv03': 'channel/watch/litv-longturn02', # 200 - 正确
+        'lhtv04': 'channel/watch/litv-longturn01', # 之前是 404
+        'lhtv05': 'channel/watch/ofiii73',         # 200 - 正确
+        'lhtv06': 'channel/watch/ofiii74',
+        'lhtv07': 'channel/watch/ofiii76',
+    }
     
+    if not os.path.exists("workers.js"): return
+
     with open("workers.js", "r", encoding="utf-8") as f:
         content = f.read()
 
-    success_count = 0
+    any_updated = False
     for cid, path in channels.items():
         aid = get_asset_id(cid, path)
         if aid:
-            # 修改了匹配模式，使其更兼容你的 workers.js 结构
-            pattern = rf'("{cid}":\s*\{{[^}}]*key:\s*")([^"]*)(")'
-            content = re.sub(pattern, rf'\1{aid}\3', content)
-            success_count += 1
-        time.sleep(2)
+            # 兼容不同格式的替换
+            pattern = rf'"{cid}":\s*\{{[^}}]*?key:\s*"[^"]*"'
+            replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
+                any_updated = True
+        time.sleep(1)
 
-    if success_count > 0:
+    if any_updated:
         with open("workers.js", "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"🎉 成功同步 {success_count} 个频道")
-    else:
-        print("😭 依然抓取不到，请更换 clash_config.yaml 里的节点")
-        exit(1)
+        print("🚀 同步成功！")
 
 if __name__ == "__main__":
     sync()
