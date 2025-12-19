@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def get_driver():
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     
-    # 防止 Selenium 内部通信被代理拦截
+    # 核心：防止 Selenium 内部通信走代理
     os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 
     # 临时关闭代理以下载驱动
@@ -27,73 +28,55 @@ def get_driver():
 
     # 设置浏览器代理
     if old_proxy:
-        options.add_argument(f'--proxy-server={old_proxy}')
+        proxy_server = old_proxy.replace("http://", "").replace("https://", "")
+        options.add_argument(f'--proxy-server=http://{proxy_server}')
+        # 排除本地地址
+        options.add_argument("--proxy-bypass-list=localhost;127.0.0.1")
 
     return webdriver.Chrome(service=service, options=options)
 
 def main():
     driver = get_driver()
-    # 频道映射表
-    channels = {
-        'lhtv01': 'litv-longturn01',
-        'lhtv02': 'litv-longturn02',
-        'lhtv03': 'litv-longturn03',
-        'lhtv04': 'litv-longturn11',
-        'lhtv05': 'litv-longturn12',
-        'lhtv06': 'litv-longturn18',
-        'lhtv07': 'litv-longturn21'
-    }
-    
-    results = {}
+    channels = {'lhtv01': 'litv-longturn01'} # 先只测一个，节省时间
     
     try:
-        for cid, slug in channels.items():
-            logger.info(f"🔍 正在抓取: {cid}")
-            url = f"https://www.ofiii.com/channel/watch/{slug}"
-            
-            try:
-                driver.get(url)
-                time.sleep(10) # 等待页面加载
-                
-                # 使用正则直接从源码提取 AssetID，不需要性能日志
-                html = driver.page_source
-                match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']{10,})["\']', html)
-                
-                if match:
-                    aid = match.group(1)
-                    logger.info(f"✅ 成功: {aid}")
-                    results[cid] = aid
-                else:
-                    logger.warning(f"❌ 失败: 未找到 ID")
-                    
-            except Exception as e:
-                logger.error(f"❌ 错误: {e}")
+        # --- 诊断步骤 1: 查 IP ---
+        logger.info("🕵️ 正在检查当前 IP...")
+        try:
+            driver.get("https://api.ipify.org?format=json")
+            time.sleep(2)
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            logger.info(f"🌍 当前浏览器 IP: {page_text}")
+        except Exception as e:
+            logger.error(f"⚠️ 无法查询 IP: {e}")
 
-        # 如果抓到了数据，更新 workers.js
-        if results:
-            update_workers_js(results)
+        # --- 诊断步骤 2: 访问目标网站 ---
+        for cid, slug in channels.items():
+            logger.info(f"🔍 正在尝试抓取: {cid}")
+            url = f"https://www.ofiii.com/channel/watch/{slug}"
+            driver.get(url)
+            time.sleep(10) 
             
+            # 打印页面标题，看看到底打开了什么
+            title = driver.title
+            logger.info(f"📄 页面标题是: [{title}]")
+            
+            # 如果标题包含 403 或 Error，直接报警
+            if "403" in title or "Error" in title or "Access Denied" in page_text:
+                logger.error("⛔ 访问被拒绝！代理可能未生效或 IP 非台湾。")
+            
+            html = driver.page_source
+            match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']{10,})["\']', html)
+            
+            if match:
+                logger.info(f"✅ 居然成功了: {match.group(1)}")
+            else:
+                logger.warning(f"❌ 依然失败")
+                # 打印一部分源码看看结构
+                logger.info(f"📝 页面源码前200字符: {html[:200]}")
+
     finally:
         driver.quit()
-
-def update_workers_js(results):
-    file_path = "workers.js"
-    if not os.path.exists(file_path):
-        logger.error("找不到 workers.js 文件")
-        return
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    for cid, aid in results.items():
-        # 替换 key 字段
-        pattern = rf'"{cid}":\s*\{{\s*name:\s*"[^"]+",\s*key:\s*"[^"]*"'
-        replacement = f'"{cid}": {{ name: "龙华频道", key: "{aid}"'
-        content = re.sub(pattern, replacement, content)
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
-    logger.info("🎉 workers.js 文件更新完成")
 
 if __name__ == "__main__":
     main()
