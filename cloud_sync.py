@@ -1,66 +1,68 @@
-import os, re, time, requests, json
+import os, re, time, requests
 
-def get_asset_id(cid, path):
-    url = f"https://www.ofiii.com/{path}"
+def get_asset_id(cid, channel_slug):
+    # 直接请求 Ofiii 的内容信息接口，channel_slug 如 'litv-longturn03'
+    api_url = f"https://www.ofiii.com/api/content/getSetAndVideoBySetId?setId={channel_slug}"
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.ofiii.com/",
-        "Accept-Language": "zh-TW,zh;q=0.9"
+        "Referer": f"https://www.ofiii.com/channel/watch/{channel_slug}",
+        "Accept": "application/json"
     }
+    
+    # 必须通过你的台湾 VPS 代理访问
     proxies = { "http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890" }
     
     try:
-        res = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        # 直接拿接口数据
+        res = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
         if res.status_code == 200:
-            # 方案 1：根据你 F12 发现的规律，匹配 /playlist/ 和 / 之间的任意字符
-            # 这种方法最暴力但也最有效
-            match = re.search(r'playlist/([a-zA-Z0-9_-]+)/', res.text)
-            
-            # 方案 2：如果方案 1 没搜到，尝试在 JSON 数据块中搜索 assetId
-            if not match:
-                match = re.search(r'"assetId":"([a-zA-Z0-9_-]+)"', res.text)
+            data = res.json()
+            # 这里的数据结构通常在 data['data']['videoList'][0]['assetId']
+            # 我们用模糊搜索确保万无一失
+            data_str = res.text
+            match = re.search(r'"assetId":"([a-zA-Z0-9_-]+)"', data_str)
             
             if match:
                 aid = match.group(1)
-                print(f"✅ {cid} 抓取成功: {aid}")
+                print(f"✅ {cid} API 抓取成功: {aid}")
                 return aid
             else:
-                # 最后的防线：如果还是找不到，打印前 500 个字符看看网页到底长啥样（方便调试）
-                print(f"⚠️ {cid} 匹配失败，网页内容预览: {res.text[:200]}")
+                print(f"⚠️ {cid} 接口返回成功但未找到 assetId")
         else:
-            print(f"❌ {cid} 状态码异常: {res.status_code}")
+            print(f"❌ {cid} API 错误: {res.status_code}")
     except Exception as e:
         print(f"🔥 {cid} 网络异常: {str(e)}")
     return None
 
 def sync():
-    # 使用你确认过的路径
+    # 注意：这里的 ID 只需要最后的斜杠部分
     channels = {
-        'lhtv01': 'channel/watch/litv-longturn03',
-        'lhtv03': 'channel/watch/litv-longturn02',
-        'lhtv05': 'channel/watch/ofiii73',
-        'lhtv06': 'channel/watch/ofiii74',
-        'lhtv07': 'channel/watch/ofiii76',
+        'lhtv01': 'litv-longturn03',
+        'lhtv03': 'litv-longturn02',
+        'lhtv05': 'ofiii73',
+        'lhtv06': 'ofiii74',
+        'lhtv07': 'ofiii76',
     }
     
     if not os.path.exists("workers.js"): return
     with open("workers.js", "r", encoding="utf-8") as f: content = f.read()
 
     any_updated = False
-    for cid, path in channels.items():
-        aid = get_asset_id(cid, path)
+    for cid, slug in channels.items():
+        aid = get_asset_id(cid, slug)
         if aid:
-            # 修改 workers.js 中的 key
+            # 兼容 workers.js 的替换
             pattern = rf'"{cid}":\s*\{{[^}}]*?key:\s*"[^"]*"'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 any_updated = True
-        time.sleep(2)
+        time.sleep(1)
 
     if any_updated:
         with open("workers.js", "w", encoding="utf-8") as f: f.write(content)
-        print("🚀 同步完成！关键 Key 已更新。")
+        print("🚀 API 同步模式完成！")
 
 if __name__ == "__main__":
     sync()
