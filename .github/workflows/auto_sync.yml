@@ -26,25 +26,22 @@ jobs:
 
       - name: 启动 Shadowsocks 代理
         run: |
-          # -------------------------------------------------------------
-          # 🔴 关键修改：尝试将加密方式改为 chacha20-ietf-poly1305
-          # 如果你的服务器真的是 aes-256-gcm，请改回 aes-256-gcm
-          # -------------------------------------------------------------
-          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m chacha20-ietf-poly1305 -l 10808 -v &
+          # 根据你的 config.json 对齐参数：
+          # server: 154.223.20.190
+          # port: 8388
+          # method: aes-256-gcm
+          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 -v &
           
-          echo "等待代理启动..."
-          sleep 3
+          echo "等待代理启动并测试台湾 IP..."
+          sleep 5
           
-          echo "测试连接..."
-          for i in {1..5}; do
-            # 使用 -v 查看详细握手过程
-            if curl -v -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
-              echo "✅ 代理连接成功！"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "⚠️ 代理依然不通，请检查服务器防火墙端口 8388 是否开放 (TCP/UDP)"
+          # 测试代理是否通畅
+          if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 10; then
+            echo "✅ 代理连接成功！"
+          else
+            echo "❌ 代理连接失败，请检查 VPS 防火墙（安全组）是否放行了 8388 端口的 TCP 流量"
+            exit 1
+          fi
 
       - name: 运行同步脚本
         env:
