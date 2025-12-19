@@ -2,63 +2,47 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    - cron: '0 19 * * *'
+    - cron: '0 19 * * *' # 北京时间凌晨3点
   workflow_dispatch:
   push:
     branches: [ main ]
 
 jobs:
-  sync-longhua:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - name: 🧩 Checkout Code
+      - name: 🧩 检出代码
         uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python
+      - name: 🐍 安装 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
 
-      - name: 📦 Install Dependencies
-        run: pip install requests==2.31.0
+      - name: 📦 安装依赖
+        run: pip install requests
 
-      - name: 🚀 Setup Proxy (Mihomo)
+      - name: 🚀 启动代理
         run: |
-          # 下载并解压 Mihomo
           wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
           gunzip -f mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 clash
           chmod +x clash
-
-          # 启动代理（直接引用仓库里的配置文件）
           nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
-          
-          # 等待并验证台湾 IP
-          echo "等待代理就绪..."
           sleep 20
-          for i in {1..6}; do
-            RES=$(curl -s -m 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode")
-            if [[ "$RES" == *"TW"* ]]; then
-              echo "✅ 代理验证成功: $RES"
-              echo "PROXY_READY=true" >> $GITHUB_ENV
-              break
-            fi
-            echo "第 $i 次尝试失败，重试中..."
-            sleep 5
-          done
+          # 验证代理是否生效
+          curl -s -x http://127.0.0.1:7890 http://ip-api.com/json/ | grep "TW" || (echo "代理未指向台湾" && exit 1)
 
-      - name: 🔄 Run Sync Script
-        run: |
-          if [ "$PROXY_READY" == "true" ]; then
-            export http_proxy="http://127.0.0.1:7890"
-            export https_proxy="http://127.0.0.1:7890"
-          fi
-          python cloud_sync.py
+      - name: 🔄 执行同步
+        env:
+          HTTP_PROXY: http://127.0.0.1:7890
+          HTTPS_PROXY: http://127.0.0.1:7890
+        run: python cloud_sync.py
 
-      - name: 📤 Commit Updates
+      - name: 📤 提交更新
         run: |
           git config --local user.email "actions@github.com"
-          git config --local user.name "github-actions"
+          git config --local user.name "Github Action"
           git add workers.js
-          git commit -m "🔄 自动更新 [$(date +'%Y-%m-%d %H:%M')]" || exit 0
+          git commit -m "🔄 自动更新钥匙 [$(date +'%Y-%m-%d %H:%M')]" || exit 0
           git push
