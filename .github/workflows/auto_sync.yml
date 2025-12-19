@@ -2,8 +2,7 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    # 每天凌晨 3 点（北京时间）
-    - cron: '0 19 * * *'
+    - cron: '0 19 * * *'   # 每天北京时间凌晨3点运行
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -12,17 +11,17 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
+  MIHOMO_VERSION: 'v1.18.9'
 
 jobs:
   sync-longhua:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout Code
+      - name: 🧩 Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -31,136 +30,119 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq curl wget unzip
-          python -m pip install --upgrade pip
-          pip install requests==2.31.0 selenium==4.9.1 selenium-wire==5.1.0 chromedriver-autoinstaller==0.6.3
+          sudo apt-get update
+          sudo apt-get install -y wget curl jq unzip
+          pip install --upgrade pip
+          pip install selenium==4.9.1 requests==2.31.0 selenium-wire==5.1.0 chromedriver-autoinstaller blinker==1.7.0
 
-      - name: 🚀 Setup Proxy (Mihomo / Clash)
+      - name: 🚀 Setup Mihomo Proxy (Auto Detect)
         run: |
           echo "=== [阶段1] 下载 Mihomo 内核 ==="
-          if wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz; then
-            gunzip mihomo-linux-amd64-v1.18.9.gz
-            mv mihomo-linux-amd64-v1.18.9 clash
-            chmod +x clash
-          else
-            echo "⚠️ 下载 Mihomo 失败，尝试 Clash 官方内核..."
-            wget -q https://github.com/Dreamacro/clash/releases/latest/download/clash-linux-amd64-v3.gz
-            gunzip clash-linux-amd64-v3.gz
-            mv clash-linux-amd64-v3 clash
-            chmod +x clash
-          fi
+          wget -q "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
+          gunzip "mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
+          mv "mihomo-linux-amd64-${MIHOMO_VERSION}" mihomo
+          chmod +x mihomo
+          echo "✅ 下载完成"
 
-          echo "=== [阶段2] 创建代理配置文件 ==="
-          cat > clash_config.yaml <<'EOF'
-          mixed-port: 7890
-          allow-lan: false
-          mode: global
-          log-level: info
-          proxies:
-            - name: "TW-01"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17001
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-            - name: "TW-02"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17002
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-            - name: "TW-03"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17003
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+          echo "=== [阶段2] 自动探测可用台湾节点端口 ==="
+          SUCCESS=false
+          for PORT in $(seq 17001 17010); do
+            echo "尝试节点端口: $PORT"
+            cat > config.yaml <<EOF
+mixed-port: 7890
+allow-lan: true
+mode: global
+log-level: info
+proxies:
+  - name: "TW"
+    type: ss
+    server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
+    port: $PORT
+    cipher: aes-256-gcm
+    password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+    udp: false
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - TW
+rules:
+  - MATCH,PROXY
+EOF
+            ./mihomo -f config.yaml > mihomo.log 2>&1 &
+            sleep 12
 
-          proxy-groups:
-            - name: "PROXY"
-              type: select
-              proxies:
-                - TW-01
-                - TW-02
-                - TW-03
-          rules:
-            - MATCH,PROXY
-          EOF
+            IP_INFO=$(curl -s --max-time 8 -x http://127.0.0.1:7890 http://ip-api.com/json/?fields=country,countryCode,query || echo '{"countryCode":"ERROR"}')
+            COUNTRY=$(echo "$IP_INFO" | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
 
-          echo "=== [阶段3] 启动 Mihomo/Clash ==="
-          nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
-          sleep 10
-
-          echo "=== [阶段4] 测试出口 IP ==="
-          for i in {1..5}; do
-            echo "第 $i 次检测..."
-            RES=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERR"}')
-            COUNTRY=$(echo "$RES" | jq -r '.countryCode')
-            IP=$(echo "$RES" | jq -r '.query')
             if [[ "$COUNTRY" == "TW" ]]; then
-              echo "✅ 代理连接成功，出口台湾 IP: $IP"
+              echo "✅ 台湾节点成功连接：$(echo "$IP_INFO" | jq -r '.query')"
               echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
+              echo "MIHOMO_PID=$(pgrep -f mihomo)" >> $GITHUB_ENV
+              SUCCESS=true
               break
+            else
+              echo "❌ 节点端口 $PORT 无法连接台湾，重试下一个..."
+              pkill -f mihomo
+              sleep 3
             fi
-            sleep 5
           done
 
-          if ! grep -q "PROXY_SUCCESS=true" $GITHUB_ENV; then
-            echo "⚠️ 代理验证未通过，尝试直连模式"
+          if [[ "$SUCCESS" == false ]]; then
+            echo "❌ 所有端口均连接失败，使用直连模式运行"
             echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
           fi
 
-      - name: 🔄 Run Sync Script
+      - name: 🌏 Verify Proxy IP
+        if: env.PROXY_SUCCESS == 'true'
+        run: |
+          echo "=== 验证代理出口 ==="
+          curl -x http://127.0.0.1:7890 -s http://ip-api.com/json/?fields=country,query | jq
+
+      - name: 🧠 Run Sync Script
         run: |
           echo "=== [阶段5] 启动同步脚本 ==="
-          if [ "$PROXY_SUCCESS" = "true" ]; then
+          if [ "${PROXY_SUCCESS}" == "true" ]; then
+            echo "✅ 使用代理运行 cloud_sync.py ..."
             export http_proxy="http://127.0.0.1:7890"
             export https_proxy="http://127.0.0.1:7890"
-            echo "🌐 当前使用代理模式运行"
+            export HTTP_PROXY="http://127.0.0.1:7890"
+            export HTTPS_PROXY="http://127.0.0.1:7890"
           else
             echo "⚠️ 当前为直连模式运行，可能无法访问龙华频道"
           fi
 
-          echo "开始执行 cloud_sync.py ..."
-          python cloud_sync.py || exit 1
-          echo "✅ 脚本执行完成"
+          python cloud_sync.py
+          EXIT_CODE=$?
+          if [[ $EXIT_CODE -ne 0 ]]; then
+            echo "❌ 同步脚本执行失败（退出码 $EXIT_CODE）"
+            exit $EXIT_CODE
+          else
+            echo "✅ 同步脚本执行成功"
+          fi
 
       - name: 📤 Commit Updates
         if: success()
         run: |
-          echo "=== [阶段6] 检查文件变更 ==="
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          echo "=== 提交更新 ==="
           git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
 
-          HAS_CHANGES=false
-
-          if ls longhua_assets_*.json 1>/dev/null 2>&1; then
-            LATEST_JSON=$(ls -t longhua_assets_*.json | head -1)
-            git add "$LATEST_JSON"
-            HAS_CHANGES=true
-          fi
-
-          if [[ -f "workers.js" ]]; then
-            git add workers.js
-            HAS_CHANGES=true
-          fi
-
-          if [ "$HAS_CHANGES" = true ]; then
-            git commit -m "🔄 Auto Sync Longhua Assets [$(date +'%Y-%m-%d %H:%M:%S')]"
+          if git diff --quiet; then
+            echo "📭 没有文件变更"
+          else
+            git add .
+            git commit -m "🔄 Auto Sync Longhua Assets ($(date '+%Y-%m-%d %H:%M:%S'))"
             git push
             echo "✅ 更新已提交"
-          else
-            echo "📭 无需提交更新"
           fi
 
       - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "清理进程与临时文件..."
-          pkill -f clash || true
-          rm -f clash clash_config.yaml clash.log *.tmp *.bak *.gz || true
-          echo "✅ 清理完成"
+          echo "=== 清理进程与文件 ==="
+          pkill -f mihomo || true
+          rm -f mihomo config.yaml mihomo.log *.tmp *.log 2>/dev/null || true
 
       - name: 📊 Upload Logs on Failure
         if: failure()
@@ -168,6 +150,6 @@ jobs:
         with:
           name: error-logs-${{ github.run_id }}
           path: |
-            clash.log
-            sync.log
+            mihomo.log
+            *.json
           retention-days: 3
