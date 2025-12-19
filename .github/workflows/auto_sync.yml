@@ -2,9 +2,9 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    # 每天凌晨3点运行（UTC时间）
-    - cron: '0 19 * * *'  # 北京时间第二天凌晨3点
-  workflow_dispatch:       # 支持手动触发
+    # 每天凌晨 3 点（北京时间）
+    - cron: '0 19 * * *'
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
@@ -12,12 +12,11 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
-  CLASH_VERSION: 'v1.19.0'
 
 jobs:
   sync-longhua:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: 🧩 Checkout Code
         uses: actions/checkout@v4
@@ -32,78 +31,32 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq wget curl unzip
-          pip install --upgrade pip
-          pip install selenium==4.9.1 requests==2.31.0
+          sudo apt-get update -y
+          sudo apt-get install -y jq curl wget unzip
+          python -m pip install --upgrade pip
+          pip install requests==2.31.0 selenium==4.9.1 selenium-wire==5.1.0 chromedriver-autoinstaller==0.6.3
 
-      - name: 🚀 Setup Clash Proxy
+      - name: 🚀 Setup Proxy (Mihomo / Clash)
         run: |
-          echo "设置 Clash 代理..."
-          echo "正在下载 Clash 核心..."
-          
-          # 尝试多个版本（适应新的命名规则）
-          CLASH_VERSIONS=("v1.19.0" "v1.18.5" "v1.18.0" "v1.17.0")
-          DOWNLOAD_SUCCESS=false
-          
-          for CLASH_VER in "${CLASH_VERSIONS[@]}"; do
-            echo "尝试下载版本: $CLASH_VER"
-            
-            # 尝试官方下载链接
-            if wget -q "https://github.com/Dreamacro/clash/releases/download/$CLASH_VER/clash-linux-amd64-$CLASH_VER.gz"; then
-              echo "✅ 下载成功: $CLASH_VER"
-              gunzip "clash-linux-amd64-$CLASH_VER.gz"
-              mv "clash-linux-amd64-$CLASH_VER" clash
-              chmod +x clash
-              DOWNLOAD_SUCCESS=true
-              echo "Clash 版本: $CLASH_VER"
-              break
-            else
-              echo "❌ 版本 $CLASH_VER 下载失败"
-            fi
-          done
-          
-          # 如果官方下载都失败，尝试备用链接
-          if [ "$DOWNLOAD_SUCCESS" = false ]; then
-            echo "尝试使用备用下载源..."
-            
-            # 方法1: 尝试直接下载最新版本
+          echo "=== [阶段1] 下载 Mihomo 内核 ==="
+          if wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz; then
+            gunzip mihomo-linux-amd64-v1.18.9.gz
+            mv mihomo-linux-amd64-v1.18.9 clash
+            chmod +x clash
+          else
+            echo "⚠️ 下载 Mihomo 失败，尝试 Clash 官方内核..."
             wget -q https://github.com/Dreamacro/clash/releases/latest/download/clash-linux-amd64-v3.gz
-            if [ $? -eq 0 ]; then
-              gunzip clash-linux-amd64-v3.gz
-              mv clash-linux-amd64-v3 clash
-              chmod +x clash
-              echo "✅ 使用备用链接下载成功"
-              DOWNLOAD_SUCCESS=true
-            else
-              # 方法2: 使用 MIHOMO (Clash Meta) 作为替代
-              echo "尝试下载 MIHOMO (Clash Meta)..."
-              wget -q https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64-v1.18.9.gz
-              if [ $? -eq 0 ]; then
-                gunzip mihomo-linux-amd64-v1.18.9.gz
-                mv mihomo-linux-amd64-v1.18.9 clash
-                chmod +x clash
-                echo "✅ 使用 MIHOMO 替代成功"
-                DOWNLOAD_SUCCESS=true
-              fi
-            fi
+            gunzip clash-linux-amd64-v3.gz
+            mv clash-linux-amd64-v3 clash
+            chmod +x clash
           fi
-          
-          if [ "$DOWNLOAD_SUCCESS" = false ]; then
-            echo "❌ 所有下载尝试都失败了"
-            echo "跳过代理设置，直接尝试访问..."
-            echo "NO_PROXY=true" >> $GITHUB_ENV
-            exit 0
-          fi
-          
-          # 创建代理配置文件（台湾节点）
-          echo "创建 Clash 配置文件..."
+
+          echo "=== [阶段2] 创建代理配置文件 ==="
           cat > clash_config.yaml <<'EOF'
           mixed-port: 7890
           allow-lan: false
           mode: global
           log-level: info
-          
           proxies:
             - name: "TW-01"
               type: ss
@@ -111,24 +64,19 @@ jobs:
               port: 17001
               cipher: aes-256-gcm
               password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-              udp: false
-            
             - name: "TW-02"
               type: ss
               server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
               port: 17002
               cipher: aes-256-gcm
               password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-              udp: false
-            
             - name: "TW-03"
               type: ss
               server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
               port: 17003
               cipher: aes-256-gcm
               password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-              udp: false
-          
+
           proxy-groups:
             - name: "PROXY"
               type: select
@@ -136,181 +84,83 @@ jobs:
                 - TW-01
                 - TW-02
                 - TW-03
-          
           rules:
             - MATCH,PROXY
           EOF
-          
-          # 启动 Clash
-          echo "启动 Clash 代理..."
-          ./clash -f clash_config.yaml > clash.log 2>&1 &
-          CLASH_PID=$!
-          echo "CLASH_PID=$CLASH_PID" >> $GITHUB_ENV
+
+          echo "=== [阶段3] 启动 Mihomo/Clash ==="
+          nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
           sleep 10
-          
-          # 验证代理连接
-          echo "测试代理连接..."
-          PROXY_SUCCESS=false
+
+          echo "=== [阶段4] 测试出口 IP ==="
           for i in {1..5}; do
-            echo "尝试 $i..."
-            RESPONSE=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERROR"}')
-            COUNTRY=$(echo $RESPONSE | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
-            
+            echo "第 $i 次检测..."
+            RES=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERR"}')
+            COUNTRY=$(echo "$RES" | jq -r '.countryCode')
+            IP=$(echo "$RES" | jq -r '.query')
             if [[ "$COUNTRY" == "TW" ]]; then
-              IP=$(echo $RESPONSE | jq -r '.query')
-              echo "✅ 代理连接成功 | IP: $IP | 国家: 台湾"
-              PROXY_SUCCESS=true
+              echo "✅ 代理连接成功，出口台湾 IP: $IP"
               echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
               break
-            elif [[ "$COUNTRY" != "ERROR" ]]; then
-              echo "尝试 $i: 当前 IP 国家: $COUNTRY"
             fi
-            sleep 3
+            sleep 5
           done
-          
-          if [ "$PROXY_SUCCESS" = false ]; then
-            echo "⚠️ 代理连接测试未通过台湾 IP"
+
+          if ! grep -q "PROXY_SUCCESS=true" $GITHUB_ENV; then
+            echo "⚠️ 代理验证未通过，尝试直连模式"
             echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
           fi
 
       - name: 🔄 Run Sync Script
         run: |
-          echo "设置代理环境..."
-          
-          # 检查代理是否可用
-          if [ -n "$CLASH_PID" ] && [ "$PROXY_SUCCESS" = "true" ]; then
+          echo "=== [阶段5] 启动同步脚本 ==="
+          if [ "$PROXY_SUCCESS" = "true" ]; then
             export http_proxy="http://127.0.0.1:7890"
             export https_proxy="http://127.0.0.1:7890"
-            export HTTP_PROXY="http://127.0.0.1:7890"
-            export HTTPS_PROXY="http://127.0.0.1:7890"
-            echo "使用代理: http://127.0.0.1:7890"
-            
-            # 验证代理连接
-            echo "验证网络环境..."
-            RESPONSE=$(curl -s http://ip-api.com/json/ || echo '{"status":"fail"}')
-            echo "当前网络: $RESPONSE"
+            echo "🌐 当前使用代理模式运行"
           else
-            echo "⚠️ 无代理模式运行"
-            echo "注意：可能需要台湾 IP 才能访问龙华网站"
+            echo "⚠️ 当前为直连模式运行，可能无法访问龙华频道"
           fi
-          
-          echo "开始执行同步脚本..."
-          python cloud_sync.py
-          
-          SYNC_EXIT_CODE=$?
-          if [[ $SYNC_EXIT_CODE -eq 0 ]]; then
-            echo "✅ 同步脚本执行成功"
-          else
-            echo "❌ 同步脚本执行失败，退出码: $SYNC_EXIT_CODE"
-            exit $SYNC_EXIT_CODE
-          fi
+
+          echo "开始执行 cloud_sync.py ..."
+          python cloud_sync.py || exit 1
+          echo "✅ 脚本执行完成"
 
       - name: 📤 Commit Updates
         if: success()
         run: |
-          echo "=== 清理临时文件 ==="
-          rm -f v2ray v2ray.zip clash clash_config.yaml clash.log 2>/dev/null || true
-          
-          echo "=== 检查文件变更 ==="
+          echo "=== [阶段6] 检查文件变更 ==="
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # 清理不需要的临时文件
-          echo "清理工作目录..."
-          rm -f *.tmp *.temp *.bak 2>/dev/null || true
-          
-          # 只处理我们关心的文件
+
           HAS_CHANGES=false
-          
-          # 1. 检查最新的 JSON 结果文件
-          echo "检查 JSON 文件..."
-          if ls longhua_assets_*.json 1> /dev/null 2>&1; then
-            # 只保留最新的一个 JSON 文件
+
+          if ls longhua_assets_*.json 1>/dev/null 2>&1; then
             LATEST_JSON=$(ls -t longhua_assets_*.json | head -1)
-            echo "发现 AssetID 文件: $LATEST_JSON"
-            
-            # 删除旧的 JSON 文件（保留最新的）
-            for json_file in longhua_assets_*.json; do
-              if [[ "$json_file" != "$LATEST_JSON" ]]; then
-                rm -f "$json_file"
-              fi
-            done
-            
-            # 检查这个文件是否已跟踪
-            if git ls-files --error-unmatch "$LATEST_JSON" >/dev/null 2>&1; then
-              echo "$LATEST_JSON 已在版本控制中，检查变更..."
-              if ! git diff --quiet -- "$LATEST_JSON"; then
-                echo "文件有变更，添加到提交"
-                git add "$LATEST_JSON"
-                HAS_CHANGES=true
-              fi
-            else
-              echo "$LATEST_JSON 是新文件，添加到提交"
-              git add "$LATEST_JSON"
-              HAS_CHANGES=true
-            fi
+            git add "$LATEST_JSON"
+            HAS_CHANGES=true
           fi
-          
-          # 2. 检查 workers.js 是否有变更
-          echo "检查 workers.js..."
+
           if [[ -f "workers.js" ]]; then
-            if git ls-files --error-unmatch "workers.js" >/dev/null 2>&1; then
-              if ! git diff --quiet -- "workers.js"; then
-                echo "workers.js 有变更，添加到提交"
-                git add workers.js
-                HAS_CHANGES=true
-              else
-                echo "workers.js 无变更"
-              fi
-            else
-              echo "workers.js 是新文件，添加到提交"
-              git add workers.js
-              HAS_CHANGES=true
-            fi
+            git add workers.js
+            HAS_CHANGES=true
           fi
-          
-          # 3. 处理日志文件（不提交，只备份）
-          echo "处理日志文件..."
-          if [[ -f "sync.log" ]]; then
-            # 备份日志文件
-            BACKUP_NAME="sync_$(date +%Y%m%d_%H%M%S).log"
-            mv sync.log "$BACKUP_NAME" 2>/dev/null || true
-            echo "日志已备份为: $BACKUP_NAME"
-          fi
-          
-          # 4. 提交更新
-          if [[ "$HAS_CHANGES" == true ]]; then
-            echo "正在提交更新..."
+
+          if [ "$HAS_CHANGES" = true ]; then
             git commit -m "🔄 Auto Sync Longhua Assets [$(date +'%Y-%m-%d %H:%M:%S')]"
             git push
             echo "✅ 更新已提交"
           else
-            echo "📭 没有检测到需要提交的变更"
+            echo "📭 无需提交更新"
           fi
-          
-          # 5. 最终清理
-          echo "最终清理..."
-          rm -f longhua_assets_*.json 2>/dev/null || true
-          rm -f sync_*.log 2>/dev/null || true
-          rm -f *.log 2>/dev/null || true
-          
-          echo "=== 完成 ==="
 
       - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "清理进程..."
-          # 停止 Clash 进程
-          if [ -n "$CLASH_PID" ]; then
-            echo "停止 Clash 进程: $CLASH_PID"
-            kill $CLASH_PID 2>/dev/null || true
-          fi
-          
-          # 清理临时文件
-          rm -f clash clash_config.yaml clash.log v2ray v2ray.zip 2>/dev/null || true
-          rm -f *.tmp *.temp *.bak 2>/dev/null || true
-          
-          echo "工作流执行完成"
+          echo "清理进程与临时文件..."
+          pkill -f clash || true
+          rm -f clash clash_config.yaml clash.log *.tmp *.bak *.gz || true
+          echo "✅ 清理完成"
 
       - name: 📊 Upload Logs on Failure
         if: failure()
