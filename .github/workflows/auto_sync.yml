@@ -1,4 +1,5 @@
 name: IPTV Auto Capture
+
 on:
   schedule:
     - cron: '0 */4 * * *'
@@ -9,33 +10,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python 和 Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          pip install -r requirements.txt
 
       - name: 启动 Mihomo (Clash Meta) 隧道
         run: |
-          # 下载 Mihomo (原 Clash Meta)
           wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
           gunzip mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 mihomo
           chmod +x mihomo
-          # 后台启动并加载配置
-          ./mihomo -f clash_config.yaml & 
-          sleep 10 # 增加等待时间确保握手完成
+          nohup ./mihomo -f clash_config.yaml > clash.log 2>&1 &
+          sleep 15
 
-      - name: 安装 Chrome 和依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          pip install "blinker<1.8.0" selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller requests
-
-      - name: 执行深度抓取脚本
+      - name: 执行抓取脚本
         run: python cloud_sync.py
 
       - name: 推送更新到仓库
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "github-actions[bot]"
-          git add workers.js
-          git commit -m "Auto Update Key: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git add workers.js || true
+          git commit -m "Auto Update IPTV Key: $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
           git push
