@@ -1,52 +1,62 @@
 import os
 import re
-import time
-import json
+import requests
 import logging
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_driver():
-    # 隔离驱动下载
-    env_copy = os.environ.copy()
-    for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'ALL_PROXY']:
-        if var in os.environ: del os.environ[var]
-    driver_path = ChromeDriverManager().install()
-    os.environ.update(env_copy)
+def get_asset_id_final(slug, proxy):
+    url = f"https://www.ofiii.com/channel/watch/{slug}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.ofiii.com/"
+    }
+    proxies = {"http": proxy, "https": proxy}
     
-    options = Options()
-    options.add_argument('--headless=new')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--proxy-server=socks5://127.0.0.1:10808')
+    try:
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        html = response.text
+        
+        # 1. 寻找 window.__PRELOADED_STATE__ 块中的 assetId
+        # 匹配 assetId":"XXXXXXXXXXX" 格式
+        match = re.search(r'assetId["\']\s*:\s*["\']([a-zA-Z0-9_-]{11})["\']', html)
+        if match:
+            return match.group(1)
+        
+        # 2. 如果失败，寻找 URL 特征 (你之前提供的 PKIOGb6cWYI 这种)
+        # 即使它没在源码显示，有时也会出现在 prefetch 链接里
+        match_url = re.search(r'/([a-zA-Z0-9_-]{11})/master\.m3u8', html)
+        if match_url:
+            return match_url.group(1)
+
+        # 3. 实在不行，打印一小段源码看看是不是被封 IP 了
+        if "抱歉，您所在的地區無法收看" in html:
+            logger.error(f"❌ 地区限制！VPS IP {proxy} 被识别为非台湾地区")
+        
+        return None
+    except Exception as e:
+        logger.error(f"请求出错: {e}")
+        return None
+
+def update_workers_js(results):
+    file_path = "workers.js"
+    if not os.path.exists(file_path): return
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
     
-    # --- 关键配置：开启性能日志记录 (抓包模式) ---
-    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
-    options.add_argument('--disable-blink-features=AutomationControlled')
-
-    return webdriver.Chrome(service=Service(driver_path), options=options)
-
-def extract_id_from_network(driver):
-    """
-    扫描浏览器所有的网络请求，寻找包含 assetId 的 m3u8 链接
-    """
-    logs = driver.get_log('performance')
-    for entry in logs:
-        try:
-            message = json.loads(entry['message'])['message']
-            if message['method'] == 'Network.requestWillBeSent':
-                url = message['params']['request']['url']
-                # 寻找包含 playlist 的链接，例如 .../video/playlist/PKIOGb6cWYI/...
-                match = re.search(r'video/playlist/([a-zA-Z0-9_-]{11})/', url)
-                if match:
-                    return match.group(1)
-        except:
-            continue
-    return None
+    count = 0
+    for cid, aid in results.items():
+        # 这里用一种更暴力的替换方式，直接找关键字
+        pattern = rf'"{cid}":\s*\{{[^{{}}]+key:\s*".*?"'
+        replacement = f'"{cid}": {{ name: "龙华频道", key: "{aid}"'
+        if re.search(pattern, content):
+            content = re.sub(pattern, replacement, content)
+            count += 1
+            
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    logger.info(f"✅ 同步完成，更新了 {count} 个 ID")
 
 def main():
     channels = {
@@ -59,43 +69,28 @@ def main():
         'lhtv07': 'litv-longturn21'
     }
     
-    driver = get_driver()
+    # 使用 socks5h 确保 DNS 也在 VPS 上解析
+    proxy = "socks5h://127.0.0.1:10808"
     results = {}
 
     try:
-        for cid, slug in channels.items():
-            logger.info(f"📡 抓包模式启动: 正在监听 {cid}...")
-            driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
-            
-            # 持续监听 25 秒，期间浏览器会自动请求 m3u8
-            found_id = None
-            for _ in range(5): # 分段检查，提高效率
-                time.sleep(5)
-                found_id = extract_id_from_network(driver)
-                if found_id: break
-            
-            if found_id:
-                logger.info(f"✨ 成功拦截到 ID: {found_id}")
-                results[cid] = found_id
-            else:
-                logger.warning(f"❌ 监听超时，未发现有效流量")
+        ip = requests.get("http://ifconfig.me/ip", proxies={"http": proxy, "https": proxy}, timeout=10).text.strip()
+        logger.info(f"🌍 出口 IP 确认: {ip}")
+    except:
+        logger.error("❌ 代理连接断开")
+        return
 
-        if results:
-            update_workers_js(results)
-    finally:
-        driver.quit()
+    for cid, slug in channels.items():
+        logger.info(f"🔍 正在检索: {cid}...")
+        aid = get_asset_id_final(slug, proxy)
+        if aid:
+            logger.info(f"✨ 发现 ID: {aid}")
+            results[cid] = aid
+        else:
+            logger.warning(f"❌ {cid} 依然没拿到 ID")
 
-def update_workers_js(results):
-    file_path = "workers.js"
-    if not os.path.exists(file_path): return
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    for cid, aid in results.items():
-        pattern = rf'("{cid}":\s*\{{[^{{}}]+key:\s*")[^"]*"'
-        content = re.sub(pattern, rf'\1{aid}"', content)
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
-    logger.info("🎉 抓包同步完成")
+    if results:
+        update_workers_js(results)
 
 if __name__ == "__main__":
     main()
