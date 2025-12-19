@@ -2,9 +2,8 @@ name: 龙华频道 AssetID 自动同步
 
 on:
   schedule:
-    # 每天北京时间早上 8 点和晚上 8 点自动执行 (UTC 0:00, 12:00)
     - cron: '0 0,12 * * *'
-  workflow_dispatch: # 允许手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -14,45 +13,48 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置 Python 环境
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 安装 Python 依赖
+      - name: 安装依赖
         run: |
           pip install selenium webdriver-manager
-
-      - name: 安装 Shadowsocks 客户端
-        run: |
           sudo apt-get update
           sudo apt-get install -y shadowsocks-libev
 
       - name: 启动 Shadowsocks 隧道
-        # 使用你提供的 VPS 节点信息
-        # 这里的加密方式假设为 aes-256-gcm，请根据实际情况修改 -m 参数
         run: |
+          # 启动后台进程
           ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 &
-          sleep 5 # 等待隧道建立
+          
+          echo "等待隧道建立并测试连接..."
+          # 循环测试，直到代理真正可用
+          for i in {1..10}; do
+            if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
+              echo "✅ Shadowsocks 隧道已就绪"
+              break
+            fi
+            echo "尝试中 ($i/10)..."
+            sleep 5
+          done
 
-      - name: 运行 Selenium 抓取脚本
+      - name: 执行抓取
         env:
-          # 告诉 Python 脚本通过本地建立的隧道访问网络
+          # 这里的变量会被 Python 脚本中的 setup_driver 读取
           HTTPS_PROXY: http://127.0.0.1:10808
           HTTP_PROXY: http://127.0.0.1:10808
-        run: |
-          python longhua_sync.py
+        run: python longhua_sync.py
 
-      - name: 提交并推送更改
+      - name: 推送更新
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # 检查 workers.js 是否有变动
           if [[ -n "$(git status --porcelain workers.js)" ]]; then
             git add workers.js
-            git commit -m "🤖 自动更新龙华频道 AssetID [$(date '+%Y-%m-%d %H:%M')]"
+            git commit -m "🤖 自动更新 [$(date '+%Y-%m-%d %H:%M')]"
             git push
           else
-            echo "没有检测到内容变化，跳过推送。"
+            echo "无变动"
           fi
