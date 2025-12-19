@@ -1,0 +1,9 @@
+mixed-port: 7890
+allow-lan: false
+mode: global
+log-level: info
+proxies:
+  - {name: "TW-01", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW-02", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17002, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+rules:
+  - MATCH,TW-01
