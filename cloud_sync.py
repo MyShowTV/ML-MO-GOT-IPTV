@@ -1,110 +1,64 @@
-import os, re, time
-import chromedriver_autoinstaller
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+name: 龙华频道 AssetID 自动同步
 
-def get_asset_id_final(cid, slug):
-    print(f"🔍 正在抓取頻道: {cid}...")
-    chromedriver_autoinstaller.install()
-    
-    options = Options()
-    # 关键：使用新的无头模式，这比旧的 --headless 更难被发现
-    options.add_argument('--headless=new')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument(f'--proxy-server=http://127.0.0.1:7890')
-    
-    # 注入一个看起来非常真实的 User-Agent
-    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    options.add_argument(f'user-agent={ua}')
+on:
+  schedule:
+    - cron: '0 0,12 * * *' # 每天两次
+  workflow_dispatch:      # 允许手动执行
 
-    # 禁用被自动化工具控制的特征
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+jobs:
+  sync:
+    runs-on: ubuntu-latest
 
-    driver = None
-    try:
-        driver = webdriver.Chrome(options=options)
-        
-        # 核心：通过 CDP 协议在页面加载前强行删除 webdriver 特征
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                window.chrome = { runtime: {} };
-            """
-        })
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-        driver.set_page_load_timeout(60)
-        # 直接访问 API 数据接口或渲染后的页面
-        driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
-        
-        # 增加等待时间，确保 Next.js 数据块渲染完成
-        time.sleep(25) 
+      - name: 初始化 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-        html = driver.page_source
-        
-        # 你的本地成功正则逻辑
-        match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', html)
-        
-        if match:
-            aid = match.group(1)
-            print(f"🎯 【成功捕获】 {cid} -> {aid}")
-            return aid
-        
-        # 备选：如果没有直接匹配到，尝试搜索脚本内的 JSON
-        print(f"⚠️ {cid} 常规匹配失败，检查源码长度: {len(html)}")
-        if len(html) < 5000:
-            print(f"❌ 源码过短，可能被拦截。")
+      - name: 安装基础依赖
+        run: |
+          pip install selenium webdriver-manager
+          sudo apt-get update
+          sudo apt-get install -y shadowsocks-libev
 
-    except Exception as e:
-        print(f"🔥 {cid} 异常: {e}")
-    finally:
-        if driver: driver.quit()
-    return None
+      - name: 开启 Shadowsocks 隧道
+        run: |
+          # 启动后台 shadowsocks-local
+          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 &
+          
+          echo "正在热身，等待代理隧道通畅..."
+          for i in {1..10}; do
+            # 使用 curl 探测 google 来确认代理是否真的通了
+            if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
+              echo "✅ 代理节点连接成功"
+              exit 0
+            fi
+            echo "尝试建立连接中 ($i/10)..."
+            sleep 5
+          done
+          echo "❌ 代理节点超时，请检查密码或 VPS 状态"
+          exit 1
 
-def main():
-    # 完整的 7 個頻道對應
-    channels = {
-    'lhtv01': {'name': '龙华卡通', 'slug': 'litv-longturn01'},
-    'lhtv02': {'name': '龙华洋片', 'slug': 'litv-longturn02'},
-    'lhtv03': {'name': '龙华电影', 'slug': 'litv-longturn03'},
-    'lhtv04': {'name': '龙华日韩', 'slug': 'litv-longturn11'},
-    'lhtv05': {'name': '龙华偶像', 'slug': 'litv-longturn12'},
-    'lhtv06': {'name': '龙华戏剧', 'slug': 'litv-longturn18'},
-    'lhtv07': {'name': '龙华经典', 'slug': 'litv-longturn21'},
-}
-    
-    workers_file = "workers.js"
-    if not os.path.exists(workers_file):
-        print(f"❌ 找不到 {workers_file}，請確認文件在同級目錄下")
-        return
-        
-    with open(workers_file, "r", encoding="utf-8") as f:
-        content = f.read()
+      - name: 运行同步脚本
+        env:
+          # 告诉 Python 脚本走 10808 代理
+          HTTPS_PROXY: http://127.0.0.1:10808
+          HTTP_PROXY: http://127.0.0.1:10808
+          # 核心修正：禁止本地通信走代理，避免 RemoteDisconnected 报错
+          NO_PROXY: localhost,127.0.0.1
+        run: python longhua_sync.py
 
-    any_updated = False
-    for cid, slug in channels.items():
-        aid = get_asset_id_final(cid, slug)
-        if aid:
-            # 正則替換 workers.js 中的 key 欄位
-            pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-            replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
-            
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                any_updated = True
-        time.sleep(3) # 頻道間隔
-
-    if any_updated:
-        with open(workers_file, "w", encoding="utf-8") as f:
-            f.write(content)
-        print("🚀 [SUCCESS] 所有頻道鑰匙已更新至 workers.js")
-    else:
-        print("😭 未能捕獲任何有效數據，請檢查代理或 Slug 是否正確。")
-
-if __name__ == "__main__":
-    main()
+      - name: 自动提交更新
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          if [[ -n "$(git status --porcelain workers.js)" ]]; then
+            git add workers.js
+            git commit -m "🤖 自动同步 AssetID [$(date '+%Y-%m-%d %H:%M')]"
+            git push
+          else
+            echo "数据未变动，无需推送"
+          fi
