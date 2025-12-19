@@ -72,63 +72,44 @@ class LonghuaCrawler:
 
     def fetch_asset_id(self, driver, slug):
         try:
-            driver.get(f"{self.base_url}{slug}")
-            # 增加等待时间，确保 JS 变量注入完成
-            time.sleep(12) 
+            url = f"{self.base_url}{slug}"
+            driver.get(url)
+            # 增加等待时间，确保页面渲染完成
+            time.sleep(15) 
             
-            # 优先从 Nuxt 内部变量提取
+            # --- 诊断：打印页面标题和部分源码 ---
+            title = driver.title
+            logger.info(f"页面标题: {title}")
+            
+            # 方案 A: 通过执行 JS 获取 Nuxt 内部变量 (最稳健)
+            # 尝试多种可能的路径
             asset_id = driver.execute_script("""
-                try { return window.__NUXT__.data[0].channelInfo.assetId; } catch(e) { return null; }
+                try {
+                    // 路径 1
+                    if (window.__NUXT__ && window.__NUXT__.data[0].channelInfo) {
+                        return window.__NUXT__.data[0].channelInfo.assetId;
+                    }
+                    // 路径 2
+                    if (window.__NUXT__ && window.__NUXT__.state.channel.current.assetId) {
+                        return window.__NUXT__.state.channel.current.assetId;
+                    }
+                } catch(e) { return null; }
+                return null;
             """)
             
-            # 正则兜底提取
+            # 方案 B: 暴力正则匹配整个源码
             if not asset_id:
                 html = driver.page_source
-                match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]{10,})"', html)
-                asset_id = match.group(1) if match else None
+                # 匹配格式如 "assetId":"LITV123456"
+                match = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']+)["\']', html)
+                if match:
+                    asset_id = match.group(1)
+            
+            # 方案 C: 如果还是不行，可能是因为地区限制导致页面没加载出来
+            if not asset_id and "ofiii" not in title.lower():
+                logger.error("警告：页面标题不含 ofiii，可能被防火墙拦截或重定向")
+
             return asset_id
         except Exception as e:
             logger.error(f"抓取 {slug} 异常: {e}")
             return None
-
-    def run(self):
-        driver = self.setup_driver()
-        results = {}
-        try:
-            for cid, info in self.channels.items():
-                logger.info(f">> 目标: {info['name']}")
-                aid = self.fetch_asset_id(driver, info['slug'])
-                if aid:
-                    logger.info(f"✅ 捕获成功: {aid}")
-                    results[cid] = {"name": info['name'], "key": aid}
-                else:
-                    logger.warning(f"❌ 捕获失败: {info['name']}")
-                time.sleep(3)
-            self.save_to_workers(results)
-        finally:
-            driver.quit()
-
-    def save_to_workers(self, results):
-        if not results:
-            logger.error("无有效数据，取消文件更新")
-            return
-        
-        file_name = "workers.js"
-        if not os.path.exists(file_name):
-            logger.error(f"找不到 {file_name}")
-            return
-
-        with open(file_name, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        for cid, data in results.items():
-            pattern = rf'"{cid}":\s*\{{\s*name:\s*"[^"]+",\s*key:\s*"[^"]*"'
-            replacement = f'"{cid}": {{ name: "{data["name"]}", key: "{data["key"]}"'
-            content = re.sub(pattern, replacement, content)
-
-        with open(file_name, "w", encoding="utf-8") as f:
-            f.write(content)
-        logger.info(f"成功同步至 {file_name}")
-
-if __name__ == "__main__":
-    LonghuaCrawler().run()
