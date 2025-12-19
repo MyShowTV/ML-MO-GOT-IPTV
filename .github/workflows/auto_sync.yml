@@ -1,60 +1,11 @@
-name: Auto Sync Longhua Assets
+- name: Setup Chrome
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
 
-on:
-  schedule:
-    - cron: '0 19 * * *'
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+    - name: Install dependencies
+      run: |
+        pip install selenium selenium-wire chromedriver-autoinstaller requests
 
-jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 🧩 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🐍 安装 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-
-      - name: 📦 安装依赖
-        run: pip install requests
-
-      - name: 🚀 启动代理
-        run: |
-          wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
-          gunzip -f mihomo-linux-amd64-v1.18.9.gz
-          mv mihomo-linux-amd64-v1.18.9 clash
-          chmod +x clash
-          # 启动 Clash，不检查结果，直接进入下一步
-          nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
-          echo "等待 20 秒让隧道建立..."
-          sleep 20
-
-      - name: 🔄 执行同步
-        env:
-          # 告诉 Python 系统：所有请求去 7890 端口
-          HTTP_PROXY: http://127.0.0.1:7890
-          HTTPS_PROXY: http://127.0.0.1:7890
-        run: |
-          echo "--- 开始执行同步脚本 ---"
-          python cloud_sync.py
-
-      - name: 📤 提交更新
-        if: success()
-        run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "Github Action"
-          git add workers.js
-          git commit -m "更新钥匙 $(date +'%Y-%m-%d %H:%M')" || exit 0
-          git push
-
-      - name: 📊 报错排查 (仅失败时运行)
-        if: failure()
-        run: |
-          echo "--- Clash 运行日志 ---"
-          tail -n 20 clash.log
-          echo "--- 网络连通性测试 ---"
-          curl -I -x http://127.0.0.1:7890 https://www.google.com || echo "完全连不通代理"
+    - name: Run Sync Script
+      run: python cloud_sync.py
