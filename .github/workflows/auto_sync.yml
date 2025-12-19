@@ -2,7 +2,6 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    # 每天凌晨 3 点（北京时间）
     - cron: '0 19 * * *'
   workflow_dispatch:
   push:
@@ -10,173 +9,78 @@ on:
     paths:
       - 'cloud_sync.py'
 
-env:
-  PYTHON_VERSION: '3.9'
-
 jobs:
   sync-longhua:
     runs-on: ubuntu-latest
-
     steps:
       - name: 🧩 Checkout Code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.9'
 
       - name: 📦 Install Dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq curl wget unzip
-          python -m pip install --upgrade pip
-          pip install requests==2.31.0 selenium==4.9.1 selenium-wire==5.1.0 chromedriver-autoinstaller==0.6.3
+          pip install requests==2.31.0
 
-      - name: 🚀 Setup Proxy (Mihomo / Clash)
+      - name: 🚀 Setup Proxy (Mihomo)
         run: |
           echo "=== [阶段1] 下载 Mihomo 内核 ==="
-          set -e
-          if wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz; then
-            gunzip -f mihomo-linux-amd64-v1.18.9.gz
-            mv mihomo-linux-amd64-v1.18.9 clash
-            chmod +x clash
-            echo "✅ 已使用 Mihomo 内核"
-          else
-            echo "⚠️ 下载 Mihomo 失败，尝试 Clash 官方内核..."
-            wget -q https://github.com/Dreamacro/clash/releases/latest/download/clash-linux-amd64-v3.gz
-            gunzip -f clash-linux-amd64-v3.gz
-            mv clash-linux-amd64-v3 clash
-            chmod +x clash
-            echo "✅ 已使用 Clash 官方内核"
-          fi
+          wget -q https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
+          gunzip -f mihomo-linux-amd64-v1.18.9.gz
+          mv mihomo-linux-amd64-v1.18.9 clash
+          chmod +x clash
 
           echo "=== [阶段2] 创建代理配置文件 ==="
-          cat > clash_config.yaml <<'EOF'
-          mixed-port: 7890
-          allow-lan: false
-          mode: global
-          log-level: info
-          proxies:
-            - name: "TW-01"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17001
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-            - name: "TW-02"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17002
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
-            - name: "TW-03"
-              type: ss
-              server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-              port: 17003
-              cipher: aes-256-gcm
-              password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+          cat > clash_config.yaml <<EOF
+mixed-port: 7890
+allow-lan: false
+mode: global
+log-level: info
+proxies:
+  - {name: "TW-01", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+rules:
+  - MATCH,TW-01
+EOF
 
-          proxy-groups:
-            - name: "PROXY"
-              type: select
-              proxies:
-                - TW-01
-                - TW-02
-                - TW-03
-          rules:
-            - MATCH,PROXY
-          EOF
-
-          echo "=== [阶段3] 启动 Mihomo/Clash ==="
+          echo "=== [阶段3] 启动 Mihomo ==="
           nohup ./clash -f clash_config.yaml > clash.log 2>&1 &
-          sleep 15
+          sleep 20
 
           echo "=== [阶段4] 测试出口 IP ==="
-          PROXY_OK=false
-          for i in {1..6}; do
-            echo "🌐 第 $i 次检测..."
-            RES=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query,status" || echo '{"status":"fail"}')
-            STATUS=$(echo "$RES" | jq -r '.status')
-            COUNTRY=$(echo "$RES" | jq -r '.countryCode')
-            IP=$(echo "$RES" | jq -r '.query')
-
-            if [[ "$STATUS" == "success" && "$COUNTRY" == "TW" ]]; then
-              echo "✅ 代理连接成功，出口台湾 IP: $IP"
-              PROXY_OK=true
+          for i in {1..5}; do
+            RES=$(curl -s -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode")
+            if [[ "$RES" == *"TW"* ]]; then
+              echo "✅ 代理验证通过: $RES"
               echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
               break
-            else
-              echo "❌ 连接失败（返回: $RES）"
             fi
+            echo "❌ 第 $i 次尝试失败，重试中..."
             sleep 5
           done
 
-          if [ "$PROXY_OK" = false ]; then
-            echo "⚠️ 代理验证未通过，进入直连模式"
-            echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
-          fi
-
       - name: 🔄 Run Sync Script
+        env:
+          HTTP_PROXY: http://127.0.0.1:7890
+          HTTPS_PROXY: http://127.0.0.1:7890
         run: |
           echo "=== [阶段5] 启动同步脚本 ==="
-          if [[ "$PROXY_SUCCESS" == "true" ]]; then
-            export http_proxy="http://127.0.0.1:7890"
-            export https_proxy="http://127.0.0.1:7890"
-            echo "🌐 当前使用代理模式运行"
-          else
-            echo "⚠️ 当前为直连模式运行，可能无法访问台湾资源"
-          fi
-
-          echo "开始执行 cloud_sync.py ..."
-          python cloud_sync.py || { echo "❌ cloud_sync.py 执行失败"; exit 1; }
-          echo "✅ 同步任务完成"
+          python cloud_sync.py
 
       - name: 📤 Commit Updates
-        if: success()
         run: |
-          echo "=== [阶段6] 检查文件变更 ==="
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-
-          HAS_CHANGES=false
-
-          if ls longhua_assets_*.json 1>/dev/null 2>&1; then
-            LATEST_JSON=$(ls -t longhua_assets_*.json | head -1)
-            git add "$LATEST_JSON"
-            HAS_CHANGES=true
-          fi
-
-          if [[ -f "workers.js" ]]; then
-            git add workers.js
-            HAS_CHANGES=true
-          fi
-
-          if [ "$HAS_CHANGES" = true ]; then
-            git commit -m "🔄 Auto Sync Longhua Assets [$(date +'%Y-%m-%d %H:%M:%S')]"
-            git push
-            echo "✅ 更新已提交"
-          else
-            echo "📭 无需提交更新"
-          fi
+          git add workers.js
+          git commit -m "🔄 Auto Sync Longhua [$(date +'%Y-%m-%d %H:%M:%S')]" || exit 0
+          git push
 
       - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "=== [阶段7] 清理进程与临时文件 ==="
           pkill -f clash || true
-          rm -f clash clash_config.yaml clash.log *.tmp *.bak *.gz || true
-          echo "✅ 清理完成"
-
-      - name: 📊 Upload Logs on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-logs-${{ github.run_id }}
-          path: |
-            clash.log
-            sync.log
-          retention-days: 3
+          rm -f clash clash_config.yaml clash.log
