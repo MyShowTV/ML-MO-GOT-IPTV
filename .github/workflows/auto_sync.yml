@@ -2,8 +2,9 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
+    # 每天凌晨3点运行（UTC时间）
     - cron: '0 19 * * *'  # 北京时间第二天凌晨3点
-  workflow_dispatch:
+  workflow_dispatch:       # 支持手动触发
   push:
     branches: [ main ]
     paths:
@@ -11,7 +12,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
-  CLASH_VERSION: 'v1.19.0'  # 更新为最新版本
+  CLASH_VERSION: 'v1.19.0'
 
 jobs:
   sync-longhua:
@@ -36,51 +37,67 @@ jobs:
           pip install --upgrade pip
           pip install selenium==4.9.1 requests==2.31.0
 
-      - name: 🚀 Setup Clash Proxy (修复版)
-        id: setup-proxy
+      - name: 🚀 Setup Clash Proxy
         run: |
           echo "设置 Clash 代理..."
-          
-          # 1. 下载 Clash（多版本尝试）
           echo "正在下载 Clash 核心..."
-          CLASH_DOWNLOADED=false
           
-          # 尝试多个版本
-          for version in "v1.19.0" "v1.18.5" "v1.18.0" "v1.17.0"; do
-            echo "尝试下载版本: $version"
-            if wget -q --timeout=30 "https://github.com/Dreamacro/clash/releases/download/${version}/clash-linux-amd64-${version}.gz"; then
-              echo "✅ 成功下载 Clash $version"
-              CLASH_VERSION=$version
-              CLASH_DOWNLOADED=true
+          # 尝试多个版本（适应新的命名规则）
+          CLASH_VERSIONS=("v1.19.0" "v1.18.5" "v1.18.0" "v1.17.0")
+          DOWNLOAD_SUCCESS=false
+          
+          for CLASH_VER in "${CLASH_VERSIONS[@]}"; do
+            echo "尝试下载版本: $CLASH_VER"
+            
+            # 尝试官方下载链接
+            if wget -q "https://github.com/Dreamacro/clash/releases/download/$CLASH_VER/clash-linux-amd64-$CLASH_VER.gz"; then
+              echo "✅ 下载成功: $CLASH_VER"
+              gunzip "clash-linux-amd64-$CLASH_VER.gz"
+              mv "clash-linux-amd64-$CLASH_VER" clash
+              chmod +x clash
+              DOWNLOAD_SUCCESS=true
+              echo "Clash 版本: $CLASH_VER"
               break
             else
-              echo "❌ 版本 $version 下载失败"
+              echo "❌ 版本 $CLASH_VER 下载失败"
             fi
           done
           
-          if [ "$CLASH_DOWNLOADED" = false ]; then
+          # 如果官方下载都失败，尝试备用链接
+          if [ "$DOWNLOAD_SUCCESS" = false ]; then
             echo "尝试使用备用下载源..."
-            wget -q "https://release.dreamacro.workers.dev/latest/clash-linux-amd64-latest.gz"
-            if [ -f "clash-linux-amd64-latest.gz" ]; then
-              echo "✅ 从备用源下载成功"
-              mv clash-linux-amd64-latest.gz clash-linux-amd64-v1.19.0.gz
-              CLASH_VERSION="v1.19.0"
-              CLASH_DOWNLOADED=true
+            
+            # 方法1: 尝试直接下载最新版本
+            wget -q https://github.com/Dreamacro/clash/releases/latest/download/clash-linux-amd64-v3.gz
+            if [ $? -eq 0 ]; then
+              gunzip clash-linux-amd64-v3.gz
+              mv clash-linux-amd64-v3 clash
+              chmod +x clash
+              echo "✅ 使用备用链接下载成功"
+              DOWNLOAD_SUCCESS=true
+            else
+              # 方法2: 使用 MIHOMO (Clash Meta) 作为替代
+              echo "尝试下载 MIHOMO (Clash Meta)..."
+              wget -q https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-amd64-v1.18.9.gz
+              if [ $? -eq 0 ]; then
+                gunzip mihomo-linux-amd64-v1.18.9.gz
+                mv mihomo-linux-amd64-v1.18.9 clash
+                chmod +x clash
+                echo "✅ 使用 MIHOMO 替代成功"
+                DOWNLOAD_SUCCESS=true
+              fi
             fi
           fi
           
-          if [ "$CLASH_DOWNLOADED" = false ]; then
-            echo "❌ Clash 下载失败，工作流终止"
-            exit 1
+          if [ "$DOWNLOAD_SUCCESS" = false ]; then
+            echo "❌ 所有下载尝试都失败了"
+            echo "跳过代理设置，直接尝试访问..."
+            echo "NO_PROXY=true" >> $GITHUB_ENV
+            exit 0
           fi
           
-          # 2. 解压和设置
-          gunzip -f "clash-linux-amd64-${CLASH_VERSION}.gz"
-          mv "clash-linux-amd64-${CLASH_VERSION}" clash
-          chmod +x clash
-          
-          # 3. 创建配置文件
-          echo "创建代理配置文件..."
+          # 创建代理配置文件（台湾节点）
+          echo "创建 Clash 配置文件..."
           cat > clash_config.yaml <<'EOF'
           mixed-port: 7890
           allow-lan: false
@@ -124,76 +141,68 @@ jobs:
             - MATCH,PROXY
           EOF
           
-          # 4. 启动 Clash
-          echo "启动 Clash..."
+          # 启动 Clash
+          echo "启动 Clash 代理..."
           ./clash -f clash_config.yaml > clash.log 2>&1 &
           CLASH_PID=$!
-          echo $CLASH_PID > clash.pid
-          sleep 20
+          echo "CLASH_PID=$CLASH_PID" >> $GITHUB_ENV
+          sleep 10
           
-          # 5. 测试连接
+          # 验证代理连接
           echo "测试代理连接..."
-          for i in {1..10}; do
-            echo "测试尝试 $i/10..."
+          PROXY_SUCCESS=false
+          for i in {1..5}; do
+            echo "尝试 $i..."
+            RESPONSE=$(curl -s --max-time 10 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERROR"}')
+            COUNTRY=$(echo $RESPONSE | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
             
-            if ! ps -p $CLASH_PID > /dev/null 2>&1; then
-              echo "❌ Clash 进程已退出"
-              echo "=== Clash 日志 ==="
-              cat clash.log 2>/dev/null || echo "无日志"
-              exit 1
+            if [[ "$COUNTRY" == "TW" ]]; then
+              IP=$(echo $RESPONSE | jq -r '.query')
+              echo "✅ 代理连接成功 | IP: $IP | 国家: 台湾"
+              PROXY_SUCCESS=true
+              echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
+              break
+            elif [[ "$COUNTRY" != "ERROR" ]]; then
+              echo "尝试 $i: 当前 IP 国家: $COUNTRY"
             fi
-            
-            # 使用更可靠的测试方法
-            if curl -s --max-time 20 -x http://127.0.0.1:7890 http://httpbin.org/ip > /dev/null 2>&1; then
-              echo "✅ 代理基本连通性测试通过"
-              RESPONSE=$(curl -s --max-time 20 -x http://127.0.0.1:7890 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERROR"}')
-              COUNTRY=$(echo $RESPONSE | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
-              
-              if [[ "$COUNTRY" == "TW" ]]; then
-                IP=$(echo $RESPONSE | jq -r '.query')
-                echo "✅ 代理连接成功 | IP: $IP | 国家: 台湾"
-                echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
-                break
-              else
-                echo "⚠️ 代理已连接但非台湾节点: $COUNTRY"
-              fi
-            else
-              echo "❌ 代理连接测试失败"
-              sleep 3
-            fi
+            sleep 3
           done
           
-          if [[ "$PROXY_SUCCESS" != "true" ]]; then
-            echo "❌ 最终代理连接失败"
-            echo "=== 网络诊断 ==="
-            curl -s http://ip-api.com/json/ | jq '.countryCode + " - " + .query' || echo "直连失败"
-            echo "=== Clash 状态 ==="
-            ps aux | grep clash || echo "无进程"
-            echo "=== Clash 日志最后10行 ==="
-            tail -n 10 clash.log 2>/dev/null || echo "无日志"
-            exit 1
+          if [ "$PROXY_SUCCESS" = false ]; then
+            echo "⚠️ 代理连接测试未通过台湾 IP"
+            echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
           fi
 
       - name: 🔄 Run Sync Script
-        env:
-          HTTP_PROXY: "http://127.0.0.1:7890"
-          HTTPS_PROXY: "http://127.0.0.1:7890"
         run: |
           echo "设置代理环境..."
-          export http_proxy="http://127.0.0.1:7890"
-          export https_proxy="http://127.0.0.1:7890"
           
-          echo "当前网络环境:"
-          curl -s http://ip-api.com/json/ | jq '.countryCode + " - " + .query'
+          # 检查代理是否可用
+          if [ -n "$CLASH_PID" ] && [ "$PROXY_SUCCESS" = "true" ]; then
+            export http_proxy="http://127.0.0.1:7890"
+            export https_proxy="http://127.0.0.1:7890"
+            export HTTP_PROXY="http://127.0.0.1:7890"
+            export HTTPS_PROXY="http://127.0.0.1:7890"
+            echo "使用代理: http://127.0.0.1:7890"
+            
+            # 验证代理连接
+            echo "验证网络环境..."
+            RESPONSE=$(curl -s http://ip-api.com/json/ || echo '{"status":"fail"}')
+            echo "当前网络: $RESPONSE"
+          else
+            echo "⚠️ 无代理模式运行"
+            echo "注意：可能需要台湾 IP 才能访问龙华网站"
+          fi
           
           echo "开始执行同步脚本..."
           python cloud_sync.py
           
-          if [[ $? -eq 0 ]]; then
+          SYNC_EXIT_CODE=$?
+          if [[ $SYNC_EXIT_CODE -eq 0 ]]; then
             echo "✅ 同步脚本执行成功"
           else
-            echo "❌ 同步脚本执行失败"
-            exit 1
+            echo "❌ 同步脚本执行失败，退出码: $SYNC_EXIT_CODE"
+            exit $SYNC_EXIT_CODE
           fi
 
       - name: 📤 Commit Updates
@@ -210,9 +219,15 @@ jobs:
           fi
           
           # 检查 workers.js 是否被更新
-          if [[ -n $(git diff --name-only HEAD workers.js 2>/dev/null) ]]; then
+          if [[ -f "workers.js" ]] && [[ -n $(git diff --name-only HEAD workers.js 2>/dev/null || echo "") ]]; then
             echo "workers.js 已被更新"
             git add workers.js
+          fi
+          
+          # 检查日志文件
+          if [[ -f "sync.log" ]]; then
+            echo "添加同步日志"
+            git add sync.log
           fi
           
           if [[ -n $(git status --porcelain) ]]; then
@@ -227,11 +242,15 @@ jobs:
         if: always()
         run: |
           echo "清理进程..."
-          if [ -f clash.pid ]; then
-            kill -9 $(cat clash.pid) 2>/dev/null || true
-            rm -f clash.pid
+          # 停止 Clash 进程
+          if [ -n "$CLASH_PID" ]; then
+            echo "停止 Clash 进程: $CLASH_PID"
+            kill $CLASH_PID 2>/dev/null || true
           fi
-          pkill -f clash 2>/dev/null || true
+          
+          # 清理临时文件
+          rm -f clash clash_config.yaml clash.log 2>/dev/null || true
+          
           echo "工作流执行完成"
 
       - name: 📊 Upload Logs on Failure
