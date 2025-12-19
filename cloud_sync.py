@@ -1,68 +1,69 @@
-import os
-import re
-import time
+import os, re, time
 import chromedriver_autoinstaller
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
 def get_asset_id_final(cid, slug):
-    print(f"🔍 正在抓取頻道: {cid} (Slug: {slug})...")
+    print(f"🔍 正在抓取頻道: {cid}...")
     chromedriver_autoinstaller.install()
     
     options = Options()
-    # 使用 headless=new 是雲端抓取的關鍵，它更像真實瀏覽器
+    # 关键：使用新的无头模式，这比旧的 --headless 更难被发现
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
+    options.add_argument(f'--proxy-server=http://127.0.0.1:7890')
     
-    # --- 關鍵偽裝：把雲端環境偽裝成你本地的 Chrome ---
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    # 注入一个看起来非常真实的 User-Agent
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    options.add_argument(f'user-agent={ua}')
+
+    # 禁用被自动化工具控制的特征
+    options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('--proxy-server=http://127.0.0.1:7890')
 
     driver = None
     try:
         driver = webdriver.Chrome(options=options)
         
-        # 抹除 WebDriver 特徵（防止被 Ofiii 拒絕訪問）
+        # 核心：通过 CDP 协议在页面加载前强行删除 webdriver 特征
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            "source": """
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                window.chrome = { runtime: {} };
+            """
         })
-        
-        driver.set_page_load_timeout(45)
+
+        driver.set_page_load_timeout(60)
+        # 直接访问 API 数据接口或渲染后的页面
         driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
         
-        # 模仿你本地的操作：給予充足的渲染時間
-        print(f"⏳ 等待 15 秒讓網頁數據完全加載...")
-        time.sleep(15) 
+        # 增加等待时间，确保 Next.js 数据块渲染完成
+        time.sleep(25) 
 
         html = driver.page_source
         
-        # 使用你本地測試成功的正則表達式
+        # 你的本地成功正则逻辑
         match = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', html)
         
         if match:
             aid = match.group(1)
-            print(f"✅ 【同步成功】 {cid} -> {aid}")
+            print(f"🎯 【成功捕获】 {cid} -> {aid}")
             return aid
-        else:
-            # 如果失敗，嘗試從 Next.js 專用的 JSON 區塊提取
-            print(f"⚠️ 常規匹配失敗，嘗試深度解析 JSON 區塊...")
-            next_match = re.search(r'id="__NEXT_DATA__".*?>(.*?)</script>', html)
-            if next_match:
-                aid_in_json = re.search(r'"assetId"\s*:\s*"([a-zA-Z0-9_-]+)"', next_match.group(1))
-                if aid_in_json:
-                    return aid_in_json.group(1)
-            
-            print(f"❌ {cid} 抓取失敗。")
+        
+        # 备选：如果没有直接匹配到，尝试搜索脚本内的 JSON
+        print(f"⚠️ {cid} 常规匹配失败，检查源码长度: {len(html)}")
+        if len(html) < 5000:
+            print(f"❌ 源码过短，可能被拦截。")
+
     except Exception as e:
-        print(f"🔥 {cid} 發生異常: {e}")
+        print(f"🔥 {cid} 异常: {e}")
     finally:
-        if driver:
-            driver.quit()
+        if driver: driver.quit()
     return None
 
 def main():
