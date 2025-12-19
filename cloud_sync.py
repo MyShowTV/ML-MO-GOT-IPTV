@@ -16,18 +16,13 @@ def get_driver():
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    # 强制伪装成真实浏览器，避免被部分反爬策略拦截
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
     proxy_addr = "socks5://127.0.0.1:10808"
     options.add_argument(f'--proxy-server={proxy_addr}')
     options.add_argument('--ignore-certificate-errors')
 
-    old_proxy = os.environ.get('HTTPS_PROXY')
-    os.environ['HTTPS_PROXY'] = ''
     service = Service(ChromeDriverManager().install())
-    os.environ['HTTPS_PROXY'] = old_proxy if old_proxy else ''
-
     return webdriver.Chrome(service=service, options=options)
 
 def main():
@@ -45,42 +40,44 @@ def main():
     results = {}
     
     try:
-        logger.info(f"🌍 代理确认：{driver.title} (通过 {driver.execute_script('return navigator.userAgent')})")
+        # 验证代理
+        driver.get("http://ifconfig.me/ip")
+        logger.info(f"🌍 当前出口 IP: {driver.find_element(By.TAG_NAME, 'body').text}")
 
         for cid, slug in channels.items():
-            logger.info(f"🔍 正在抓取: {cid}")
+            logger.info(f"🔍 正在抓取: {cid} ({slug})")
             url = f"https://www.ofiii.com/channel/watch/{slug}"
             
             driver.get(url)
-            # 等待时间稍微错开，模拟人为
-            time.sleep(15) 
+            time.sleep(12) # 等待渲染
             
-            html = driver.page_source
-            
-            # --- 强化版正则匹配 ---
-            # 兼容多种写法：assetId: "xxx" 或 "assetId":"xxx" 或 asset_id 等
-            patterns = [
-                r'["\']assetId["\']\s*[:=]\s*["\']([^"\']{15,})["\']',
-                r'["\']id["\']\s*[:=]\s*["\'](LITV[^"\']+)["\']', # 针对 ofiii 常见的 LITV 开头的 ID
-                r'assetId\s*=\s*["\']([^"\']+)["\']'
-            ]
-            
-            found_id = None
-            for p in patterns:
-                match = re.search(p, html)
+            # 方法 1: 尝试从页面全局变量中直接读取 (最准确)
+            found_id = driver.execute_script("""
+                try {
+                    return window.__PRELOADED_STATE__.video.programInfo.assetId;
+                } catch(e) {
+                    return null;
+                }
+            """)
+
+            # 方法 2: 如果方法 1 失败，使用全网页源码正则搜寻 11 位特征 ID
+            if not found_id:
+                html = driver.page_source
+                # 寻找类似 PKIOGb6cWYI 这种出现在 cdi.ofiii.com 路径中的 ID
+                match = re.search(r'/video/playlist/([a-zA-Z0-9_-]{10,12})/', html)
                 if match:
                     found_id = match.group(1)
-                    break
-            
+                else:
+                    # 备选正则：搜寻 JSON 中的 assetId 字段
+                    match_json = re.search(r'["\']assetId["\']\s*:\s*["\']([^"\']+)["\']', html)
+                    if match_json:
+                        found_id = match_json.group(1)
+
             if found_id:
                 logger.info(f"✅ 成功获取 {cid}: {found_id}")
                 results[cid] = found_id
             else:
-                logger.warning(f"❌ {cid} 抓取失败。")
-                # 记录页面中所有看起来像 ID 的长字符串（仅前两个，用于调试）
-                potential_ids = re.findall(r'LITV[a-zA-Z0-9_-]{5,}', html)
-                if potential_ids:
-                    logger.info(f"📝 发现疑似 ID 候选词: {list(set(potential_ids))[:3]}")
+                logger.warning(f"❌ {cid} 抓取失败，页面标题: {driver.title}")
 
         if results:
             update_workers_js(results)
@@ -94,19 +91,15 @@ def update_workers_js(results):
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     
-    updated_count = 0
     for cid, aid in results.items():
-        # 更新逻辑：匹配 "lhtv01": { ... key: "旧ID" }
-        pattern = rf'"{cid}":\s*\{{[^{{}}]+key:\s*"[^"]*"'
-        # 保持原来的 name 字段，只替换 key
-        if re.search(pattern, content):
-            new_pattern_content = re.sub(r'key:\s*"[^"]*"', f'key: "{aid}"', re.search(pattern, content).group())
-            content = re.sub(pattern, new_pattern_content, content)
-            updated_count += 1
+        # 这里假设你的 workers.js 结构是 "lhtv03": { ... key: "PKIOGb6cWYI" }
+        # 使用正则精准替换对应 cid 下的 key 字段
+        pattern = rf'("{cid}":\s*\{{[^{{}}]+key:\s*")[^"]*"'
+        content = re.sub(pattern, rf'\1{aid}"', content)
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
-    logger.info(f"🎉 成功更新了 {updated_count} 个频道的 ID")
+    logger.info("🎉 workers.js ID 同步更新完成")
 
 if __name__ == "__main__":
     main()
