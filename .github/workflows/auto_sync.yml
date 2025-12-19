@@ -2,9 +2,8 @@ name: Auto Sync Longhua Assets
 
 on:
   schedule:
-    # 每天凌晨3点运行（UTC时间）
-    - cron: '0 19 * * *'  # 北京时间第二天凌晨3点
-  workflow_dispatch:       # 支持手动触发
+    - cron: '0 19 * * *'  # 每天北京时间凌晨3点
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
@@ -12,7 +11,6 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
-  V2RAY_VERSION: 'v5.16.1'
 
 jobs:
   sync-longhua:
@@ -43,157 +41,100 @@ jobs:
           echo "正在下载 V2Ray 核心..."
           
           # 下载 V2Ray
-          V2RAY_DOWNLOAD_URL="https://github.com/v2fly/v2ray-core/releases/download/${{ env.V2RAY_VERSION }}/v2ray-linux-64.zip"
+          V2RAY_URL="https://github.com/v2fly/v2ray-core/releases/download/v5.16.1/v2ray-linux-64.zip"
+          echo "下载 V2Ray: $V2RAY_URL"
           
-          echo "下载 V2Ray: $V2RAY_DOWNLOAD_URL"
-          
-          if wget -q "$V2RAY_DOWNLOAD_URL" -O v2ray.zip; then
+          wget -q "$V2RAY_URL" -O v2ray.zip
+          if [ $? -eq 0 ]; then
             echo "✅ V2Ray 下载成功"
-            
-            # 解压
-            unzip -q v2ray.zip -d v2ray_temp
-            mv v2ray_temp/v2ray v2ray
-            mv v2ray_temp/v2ctl .
+            unzip -q v2ray.zip v2ray v2ctl -d .
             chmod +x v2ray v2ctl
-            
-            # 创建配置文件
-            echo "创建 V2Ray 配置文件..."
-            cat > config.json <<'EOF'
-            {
-              "inbounds": [
-                {
-                  "port": 10808,
-                  "listen": "127.0.0.1",
-                  "protocol": "socks",
-                  "settings": {
-                    "auth": "noauth",
-                    "udp": true
-                  },
-                  "sniffing": {
-                    "enabled": true,
-                    "destOverride": ["http", "tls"]
-                  }
-                }
-              ],
-              "outbounds": [
-                {
-                  "protocol": "shadowsocks",
-                  "settings": {
-                    "servers": [
-                      {
-                        "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
-                        "port": 17001,
-                        "method": "aes-256-gcm",
-                        "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d",
-                        "level": 0
-                      },
-                      {
-                        "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
-                        "port": 17002,
-                        "method": "aes-256-gcm",
-                        "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d",
-                        "level": 0
-                      },
-                      {
-                        "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
-                        "port": 17003,
-                        "method": "aes-256-gcm",
-                        "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d",
-                        "level": 0
-                      }
-                    ]
-                  },
-                  "tag": "proxy"
-                },
-                {
-                  "protocol": "freedom",
-                  "tag": "direct"
-                }
-              ],
-              "routing": {
-                "domainStrategy": "AsIs",
-                "rules": [
-                  {
-                    "type": "field",
-                    "ip": [
-                      "geoip:private",
-                      "geoip:cn"
-                    ],
-                    "outboundTag": "direct"
-                  },
-                  {
-                    "type": "field",
-                    "domain": [
-                      "geosite:cn"
-                    ],
-                    "outboundTag": "direct"
-                  }
-                ]
-              }
-            }
-            EOF
-            
-            echo "启动 V2Ray..."
-            ./v2ray -config config.json > v2ray.log 2>&1 &
-            V2RAY_PID=$!
-            echo "V2RAY_PID=$V2RAY_PID" >> $GITHUB_ENV
-            
-            # 等待启动
-            sleep 8
-            
-            # 测试代理连接
-            echo "测试代理连接..."
-            PROXY_SUCCESS=false
-            for i in {1..5}; do
-              echo "尝试 $i/5..."
-              
-              # 使用 curl 通过代理测试
-              RESPONSE=$(curl -s --max-time 15 --socks5-hostname 127.0.0.1:10808 "http://ip-api.com/json/?fields=countryCode,query,isp" || echo '{"status":"fail"}')
-              STATUS=$(echo $RESPONSE | jq -r '.status' 2>/dev/null || echo "error")
-              
-              if [[ "$STATUS" == "success" ]]; then
-                COUNTRY=$(echo $RESPONSE | jq -r '.countryCode')
-                IP=$(echo $RESPONSE | jq -r '.query')
-                ISP=$(echo $RESPONSE | jq -r '.isp' 2>/dev/null || echo "Unknown")
-                
-                echo "✅ 代理连接成功"
-                echo "  IP: $IP"
-                echo "  国家: $COUNTRY"
-                echo "  ISP: $ISP"
-                
-                if [[ "$COUNTRY" == "TW" ]]; then
-                  echo "🎯 成功连接到台湾节点"
-                  PROXY_SUCCESS=true
-                  echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
-                  break
-                else
-                  echo "⚠️ 当前节点国家: $COUNTRY (非台湾)"
-                  echo "尝试切换节点..."
-                  
-                  # 如果需要，可以在这里添加节点切换逻辑
-                  # 当前配置会轮流尝试 17001-17003 端口
-                fi
-              else
-                echo "❌ 代理连接失败"
-              fi
-              
-              if [[ $i -lt 5 ]]; then
-                sleep 3
-              fi
-            done
-            
-            if [ "$PROXY_SUCCESS" = false ]; then
-              echo "⚠️ 未能连接到台湾节点，但仍将继续运行"
-              echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
-            fi
-            
-            # 清理临时文件
-            rm -rf v2ray_temp v2ray.zip geosite.dat geoip.dat
-            
+            rm v2ray.zip
           else
-            echo "❌ V2Ray 下载失败"
-            echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
+            echo "❌ V2Ray 下载失败，跳过代理设置"
             echo "NO_PROXY=true" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # 创建 V2Ray 配置文件
+          echo "创建 V2Ray 配置文件..."
+          cat > config.json << 'CONFIG_EOF'
+          {
+            "inbounds": [
+              {
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {
+                  "auth": "noauth",
+                  "udp": false
+                },
+                "listen": "127.0.0.1"
+              }
+            ],
+            "outbounds": [
+              {
+                "protocol": "shadowsocks",
+                "settings": {
+                  "servers": [
+                    {
+                      "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
+                      "port": 17001,
+                      "method": "aes-256-gcm",
+                      "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d"
+                    },
+                    {
+                      "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
+                      "port": 17002,
+                      "method": "aes-256-gcm",
+                      "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d"
+                    },
+                    {
+                      "address": "brtlee3ogRTfxtWt.xf9pzeslxw.sbs",
+                      "port": 17003,
+                      "method": "aes-256-gcm",
+                      "password": "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d"
+                    }
+                  ]
+                }
+              }
+            ],
+            "routing": {
+              "domainStrategy": "AsIs",
+              "rules": []
+            }
+          }
+          CONFIG_EOF
+          
+          # 启动 V2Ray
+          echo "启动 V2Ray 代理..."
+          ./v2ray -config config.json > v2ray.log 2>&1 &
+          V2RAY_PID=$!
+          echo "V2RAY_PID=$V2RAY_PID" >> $GITHUB_ENV
+          sleep 8
+          
+          # 测试代理连接
+          echo "测试代理连接..."
+          PROXY_SUCCESS=false
+          for i in {1..5}; do
+            echo "尝试 $i/5..."
+            RESPONSE=$(curl -s --max-time 10 --socks5-hostname 127.0.0.1:10808 "http://ip-api.com/json/?fields=countryCode,query" || echo '{"countryCode":"ERROR"}')
+            COUNTRY=$(echo $RESPONSE | jq -r '.countryCode' 2>/dev/null || echo "ERROR")
+            
+            if [[ "$COUNTRY" == "TW" ]]; then
+              IP=$(echo $RESPONSE | jq -r '.query')
+              echo "✅ 代理连接成功 | IP: $IP | 国家: 台湾"
+              PROXY_SUCCESS=true
+              echo "PROXY_SUCCESS=true" >> $GITHUB_ENV
+              break
+            elif [[ "$COUNTRY" != "ERROR" ]]; then
+              echo "当前 IP 国家: $COUNTRY"
+            fi
+            sleep 2
+          done
+          
+          if [ "$PROXY_SUCCESS" = false ]; then
+            echo "⚠️ 代理连接测试未通过台湾 IP"
+            echo "PROXY_SUCCESS=false" >> $GITHUB_ENV
           fi
 
       - name: 🔄 Run Sync Script
@@ -202,19 +143,16 @@ jobs:
           
           # 检查代理是否可用
           if [ -n "$V2RAY_PID" ] && [ "$PROXY_SUCCESS" = "true" ]; then
-            # 设置代理环境变量（SOCKS5）
-            export ALL_PROXY="socks5://127.0.0.1:10808"
-            export HTTP_PROXY="socks5://127.0.0.1:10808"
-            export HTTPS_PROXY="socks5://127.0.0.1:10808"
             export http_proxy="socks5://127.0.0.1:10808"
             export https_proxy="socks5://127.0.0.1:10808"
-            
+            export HTTP_PROXY="socks5://127.0.0.1:10808"
+            export HTTPS_PROXY="socks5://127.0.0.1:10808"
             echo "使用 SOCKS5 代理: socks5://127.0.0.1:10808"
             
             # 验证代理连接
             echo "验证网络环境..."
-            RESPONSE=$(curl -s --max-time 10 "http://ip-api.com/json/" || echo '{"status":"fail"}')
-            echo "当前网络状态: $RESPONSE"
+            RESPONSE=$(curl -s --socks5-hostname 127.0.0.1:10808 http://ip-api.com/json/ || echo '{"status":"fail"}')
+            echo "当前网络: $RESPONSE"
           else
             echo "⚠️ 无代理模式运行"
             echo "注意：可能需要台湾 IP 才能访问龙华网站"
@@ -228,18 +166,11 @@ jobs:
             echo "✅ 同步脚本执行成功"
           else
             echo "❌ 同步脚本执行失败，退出码: $SYNC_EXIT_CODE"
-            
-            # 显示更多错误信息
-            if [[ -f "sync.log" ]]; then
-              echo "=== 同步日志最后20行 ==="
-              tail -n 20 sync.log || true
-            fi
-            
-            exit $SYNC_EXIT_CODE
+            # 不立即退出，尝试完成后续步骤
           fi
 
       - name: 📤 Commit Updates
-        if: success()
+        if: always()
         run: |
           echo "检查文件变更..."
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -252,12 +183,9 @@ jobs:
           fi
           
           # 检查 workers.js 是否被更新
-          if [[ -f "workers.js" ]]; then
-            if [[ -n $(git diff --name-only HEAD workers.js 2>/dev/null || echo "") ]] || \
-               [[ -n $(git status --porcelain workers.js 2>/dev/null || echo "") ]]; then
-              echo "workers.js 已被更新"
-              git add workers.js
-            fi
+          if [[ -f "workers.js" ]] && [[ -n $(git diff --name-only HEAD workers.js 2>/dev/null || echo "") ]]; then
+            echo "workers.js 已被更新"
+            git add workers.js
           fi
           
           # 检查日志文件
@@ -277,13 +205,11 @@ jobs:
       - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "清理进程和临时文件..."
-          
+          echo "清理进程..."
           # 停止 V2Ray 进程
           if [ -n "$V2RAY_PID" ]; then
             echo "停止 V2Ray 进程: $V2RAY_PID"
             kill $V2RAY_PID 2>/dev/null || true
-            sleep 2
           fi
           
           # 清理临时文件
