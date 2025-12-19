@@ -1,7 +1,7 @@
 name: IPTV Auto Capture
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,27 +12,39 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: 启动 Mihomo 隧道
+      - name: 啟動 Mihomo (Clash) 隧道
         run: |
           wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
           gunzip mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 mihomo
           chmod +x mihomo
           ./mihomo -f clash_config.yaml & 
-          sleep 10
+          
+          echo "等待代理握手 (最多 60 秒)..."
+          for i in {1..12}; do
+            # 測試是否能透過代理訪問網頁，確保 IP 已切換
+            if curl -x http://127.0.0.1:7890 -I https://www.google.com --max-time 5; then
+              echo "✅ 代理連線成功！"
+              curl -x http://127.0.0.1:7890 https://ifconfig.me
+              break
+            fi
+            echo "⏳ 嘗試第 $i 次..."
+            sleep 5
+          done
+
           echo "http_proxy=http://127.0.0.1:7890" >> $GITHUB_ENV
           echo "https_proxy=http://127.0.0.1:7890" >> $GITHUB_ENV
 
-      - name: 安装依赖
+      - name: 安裝環境
         run: pip install selenium chromedriver-autoinstaller requests
 
-      - name: 执行同步脚本
+      - name: 執行同步腳本
         run: python cloud_sync.py
 
-      - name: 推送更新
+      - name: 提交更新
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "github-actions[bot]"
           git add workers.js
-          git commit -m "Auto sync lhtv01-07: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Auto sync: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
