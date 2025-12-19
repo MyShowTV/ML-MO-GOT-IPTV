@@ -1,9 +1,39 @@
 mixed-port: 7890
 allow-lan: false
-mode: global
+mode: rule
 log-level: info
+
+# 节点列表（从你的 SSRDOG 订阅提取）
 proxies:
-  - {name: "TW-01", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
-  - {name: "TW-02", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17002, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW01", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW02", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17002, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW03", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17003, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW04", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17004, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW05", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17005, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW06", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17006, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW07", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17007, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW08", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17008, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW09", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17009, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW10", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17010, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+
+# 策略组：自动选择延迟最低的台湾节点
+proxy-groups:
+  - name: "AUTO-TW"
+    type: url-test
+    proxies:
+      - TW01
+      - TW02
+      - TW03
+      - TW04
+      - TW05
+      - TW06
+      - TW07
+      - TW08
+      - TW09
+      - TW10
+    url: http://cp.cloudflare.com/generate_204
+    interval: 300
+
+# 规则：所有流量强制走台湾代理
 rules:
-  - MATCH,TW-01
+  - MATCH,AUTO-TW
