@@ -1,28 +1,50 @@
-name: IPTV Sync Agent
+name: Auto Sync IPTV Assets
+
 on:
-  schedule: [{cron: '0 19 * * *'}]
+  schedule:
+    - cron: '0 19 * * *'
   workflow_dispatch:
+  push:
+    branches: [ main ]
+
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Proxy
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Setup Proxy (Mihomo)
         run: |
           wget -qO- https://github.com/MetaCubeX/mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz | gunzip > clash
           chmod +x clash
-          cat <<EOF > c.yaml
+          cat <<EOF > config.yaml
 mixed-port: 7890
 mode: global
 proxies:
-  - {name: TW, type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
+  - {name: "TW", type: ss, server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs, port: 17001, cipher: aes-256-gcm, password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d}
 EOF
-          ./clash -f c.yaml &
+          ./clash -f config.yaml > clash.log 2>&1 &
           sleep 15
-      - name: Run
+
+      - name: Run Scraper
         env:
           HTTP_PROXY: http://127.0.0.1:7890
           HTTPS_PROXY: http://127.0.0.1:7890
         run: |
           pip install requests
           python cloud_sync.py
+
+      - name: Commit & Push
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add workers.js
+          if ! git diff --cached --quiet; then
+            git commit -m "🔄 自动同步龙华钥匙"
+            git push
+          fi
