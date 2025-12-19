@@ -20,25 +20,31 @@ jobs:
 
       - name: 安装依赖
         run: |
-          # 直接安装，不再寻找 requirements.txt
           pip install selenium webdriver-manager
           sudo apt-get update
           sudo apt-get install -y shadowsocks-libev
 
       - name: 启动 Shadowsocks 代理
         run: |
-          # 请确认 SS_PASSWORD 已在 Secrets 中配置
-          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 &
+          # -------------------------------------------------------------
+          # 🔴 关键修改：尝试将加密方式改为 chacha20-ietf-poly1305
+          # 如果你的服务器真的是 aes-256-gcm，请改回 aes-256-gcm
+          # -------------------------------------------------------------
+          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m chacha20-ietf-poly1305 -l 10808 -v &
           
           echo "等待代理启动..."
-          for i in {1..10}; do
-            if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
-              echo "✅ 代理连接成功"
+          sleep 3
+          
+          echo "测试连接..."
+          for i in {1..5}; do
+            # 使用 -v 查看详细握手过程
+            if curl -v -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
+              echo "✅ 代理连接成功！"
               exit 0
             fi
             sleep 3
           done
-          echo "⚠️ 代理可能未连通，尝试继续运行脚本..."
+          echo "⚠️ 代理依然不通，请检查服务器防火墙端口 8388 是否开放 (TCP/UDP)"
 
       - name: 运行同步脚本
         env:
