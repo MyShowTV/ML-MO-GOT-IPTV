@@ -1,64 +1,78 @@
-name: 龙华频道 AssetID 自动同步
+import os, re, time, json
+import chromedriver_autoinstaller
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
-on:
-  schedule:
-    - cron: '0 0,12 * * *' # 每天两次
-  workflow_dispatch:      # 允许手动执行
+def get_asset_id_advanced(cid, slug):
+    print(f"🔍 正在抓取频道: {cid} -> {slug}")
+    chromedriver_autoinstaller.install()
 
-jobs:
-  sync:
-    runs-on: ubuntu-latest
+    options = Options()
+    options.add_argument('--headless=new')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+    # 使用 DevTools 协议代替 selenium-wire
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(45)
+    driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
+    time.sleep(15)
 
-      - name: 初始化 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    logs = driver.get_log('performance')
+    aid = None
+    for entry in logs:
+        try:
+            msg = json.loads(entry['message'])
+            url = msg['message']['params'].get('request', {}).get('url', '')
+            if 'master.m3u8' in url:
+                match = re.search(r'playlist/([a-zA-Z0-9_-]+)/', url)
+                if match:
+                    aid = match.group(1)
+                    print(f"✅ 捕获成功: {aid}")
+                    break
+        except:
+            pass
 
-      - name: 安装基础依赖
-        run: |
-          pip install selenium webdriver-manager
-          sudo apt-get update
-          sudo apt-get install -y shadowsocks-libev
+    if not aid:
+        print(f"❌ {cid}: 未找到 m3u8 请求")
+    driver.quit()
+    return aid
 
-      - name: 开启 Shadowsocks 隧道
-        run: |
-          # 启动后台 shadowsocks-local
-          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 &
-          
-          echo "正在热身，等待代理隧道通畅..."
-          for i in {1..10}; do
-            # 使用 curl 探测 google 来确认代理是否真的通了
-            if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 5; then
-              echo "✅ 代理节点连接成功"
-              exit 0
-            fi
-            echo "尝试建立连接中 ($i/10)..."
-            sleep 5
-          done
-          echo "❌ 代理节点超时，请检查密码或 VPS 状态"
-          exit 1
+def main():
+    channels = {
+        'lhtv01': 'litv-longturn03',
+        'lhtv03': 'litv-longturn02',
+        'lhtv05': 'ofiii73',
+        'lhtv06': 'ofiii74',
+        'lhtv07': 'ofiii76',
+    }
 
-      - name: 运行同步脚本
-        env:
-          # 告诉 Python 脚本走 10808 代理
-          HTTPS_PROXY: http://127.0.0.1:10808
-          HTTP_PROXY: http://127.0.0.1:10808
-          # 核心修正：禁止本地通信走代理，避免 RemoteDisconnected 报错
-          NO_PROXY: localhost,127.0.0.1
-        run: python longhua_sync.py
+    if not os.path.exists("workers.js"):
+        print("❌ 未找到 workers.js")
+        return
 
-      - name: 自动提交更新
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          if [[ -n "$(git status --porcelain workers.js)" ]]; then
-            git add workers.js
-            git commit -m "🤖 自动同步 AssetID [$(date '+%Y-%m-%d %H:%M')]"
-            git push
-          else
-            echo "数据未变动，无需推送"
-          fi
+    with open("workers.js", "r", encoding="utf-8") as f:
+        content = f.read()
+
+    any_updated = False
+    for cid, slug in channels.items():
+        aid = get_asset_id_advanced(cid, slug)
+        if aid:
+            pattern = rf'"{cid}"\s*:\s*\{{[^{{}}]*?key\s*:\s*["\'][^"\']*["\']'
+            replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
+            content, n = re.subn(pattern, replacement, content)
+            if n > 0:
+                any_updated = True
+        time.sleep(5)
+
+    if any_updated:
+        with open("workers.js", "w", encoding="utf-8") as f:
+            f.write(content)
+        print("🚀 更新成功！workers.js 已同步最新 key。")
+    else:
+        print("😭 未更新任何 key。")
+
+if __name__ == "__main__":
+    main()
