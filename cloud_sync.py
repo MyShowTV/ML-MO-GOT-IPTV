@@ -69,14 +69,14 @@ def get_asset_id_final(cid, slug):
 def main():
     # 完整的 7 個頻道對應
     channels = {
-        'lhtv01': 'litv-longturn03', # 龍華電影
-        'lhtv02': 'litv-longturn21', # 龍華經典
-        'lhtv03': 'litv-longturn18', # 龍華戲劇
-        'lhtv04': 'litv-longturn11', # 龍華日韓
-        'lhtv05': 'litv-longturn12', # 龍華偶像
-        'lhtv06': 'litv-longturn01', # 龍華卡通
-        'lhtv07': 'litv-longturn02', # 龍華洋片
-    }
+    'lhtv01': {'name': '龙华卡通', 'slug': 'litv-longturn01'},
+    'lhtv02': {'name': '龙华洋片', 'slug': 'litv-longturn02'},
+    'lhtv03': {'name': '龙华电影', 'slug': 'litv-longturn03'},
+    'lhtv04': {'name': '龙华日韩', 'slug': 'litv-longturn11'},
+    'lhtv05': {'name': '龙华偶像', 'slug': 'litv-longturn12'},
+    'lhtv06': {'name': '龙华戏剧', 'slug': 'litv-longturn18'},
+    'lhtv07': {'name': '龙华经典', 'slug': 'litv-longturn21'},
+}
     
     workers_file = "workers.js"
     if not os.path.exists(workers_file):
