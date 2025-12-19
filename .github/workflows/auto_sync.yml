@@ -1,41 +1,38 @@
-name: IPTV Auto Sync
+name: IPTV Auto Capture
 on:
   schedule:
-    - cron: '0 */6 * * *' # 每6小时运行一次
-  workflow_dispatch:      # 支持手动运行
+    - cron: '0 */4 * * *' # 每4小时自动抓一次
+  workflow_dispatch:
 
 jobs:
-  update-source:
+  run-sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # 必须开启写入权限
-    
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Install Chrome
+      - name: 启动 Clash 隧道
+        run: |
+          wget https://github.com/Dreamacro/clash/releases/download/v1.18.0/clash-linux-amd64-v1.18.0.gz
+          gunzip clash-linux-amd64-v1.18.0.gz
+          chmod +x clash-linux-amd64-v1.18.0
+          ./clash-linux-amd64-v1.18.0 -f clash_config.yaml & 
+          sleep 8 # 给 Clash 足够的时间建立节点连接
+
+      - name: 安装 Chrome 和依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+          pip install "blinker<1.8.0" selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller requests
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Sync Script
+      - name: 执行抓取脚本
         run: python cloud_sync.py
 
-      - name: Push Changes
+      - name: 推送更新到仓库
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "github-actions[bot]"
           git add workers.js
-          git commit -m "Update Keys: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
