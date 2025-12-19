@@ -41,14 +41,14 @@ def get_asset_id(cid, path):
 def sync():
     # 更新了最新的官方路径
     channels = {
-        'lhtv01': 'channel/litv-longturn03',
-        'lhtv02': 'channel/litv-longturn05',
-        'lhtv03': 'channel/litv-longturn02',
-        'lhtv04': 'channel/litv-longturn04',
-        'lhtv05': 'channel/litv-longturn01',
-        'lhtv06': 'channel/litv-longturn06',
-        'lhtv07': 'channel/litv-longturn07',
-    }
+    'lhtv01': 'channel/watch/litv-longturn03',
+    'lhtv02': 'channel/watch/litv-longturn05',
+    'lhtv03': 'channel/watch/litv-longturn02',
+    'lhtv04': 'channel/watch/litv-longturn04',
+    'lhtv05': 'channel/watch/litv-longturn01',
+    'lhtv06': 'channel/watch/litv-longturn06',
+    'lhtv07': 'channel/watch/litv-longturn07',
+}
     
     with open("workers.js", "r", encoding="utf-8") as f:
         content = f.read()
