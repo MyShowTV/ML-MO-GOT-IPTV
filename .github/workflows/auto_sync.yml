@@ -1,11 +1,17 @@
-- name: Setup Chrome
+- name: 安装 Chrome 浏览器
       run: |
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
 
-    - name: Install dependencies
-      run: |
-        pip install selenium selenium-wire chromedriver-autoinstaller requests
+    - name: 设置 Python 并安装依赖
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
 
-    - name: Run Sync Script
-      run: python cloud_sync.py
+    - name: 一键安装 requirements.txt 依赖
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 运行抓取脚本
+      run: python iptv_main.py
