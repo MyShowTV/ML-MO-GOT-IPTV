@@ -34,7 +34,7 @@ def get_asset_id_advanced(cid, slug):
         driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
         time.sleep(12) # 等待初始框架加载
 
-        # 2. 执行 JS 强行点击所有 video 标签和播放器按钮
+       # 2. 执行 JS 强行点击所有 video 标签和播放器按钮
         print("🖱️ 正在执行 JS 交互逻辑...")
         js_script = """
             // 尝试播放页面上所有的 video 标签
@@ -44,7 +44,8 @@ def get_asset_id_advanced(cid, slug):
             }
             // 模拟点击页面中心
             var evt = document.createEvent("MouseEvents");
-            evt.initMouseEvent("click", True, True, window, 0, 0, 0, 0, 0, False, False, False, False, 0, null);
+            // 注意：下面这一行的 True 必须改为小写的 true
+            evt.initMouseEvent("click", true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
             document.dispatchEvent(evt);
         """
         driver.execute_script(js_script)
