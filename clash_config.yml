@@ -1,17 +1,17 @@
 mixed-port: 7890
+allow-lan: true
 mode: global
 log-level: info
-allow-lan: true
+ipv6: false
 
 proxies:
-  # 这里直接提取你机场里的 台湾 01 节点
-  - name: "机场-台湾节点"
+  - name: "🇨🇳 Taiwan丨01"
     type: ss
     server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
     port: 17001
     cipher: aes-256-gcm
-    password: "1d23e3c5-c047-46a0-b7d8-d838aff7ae8d"
+    password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
     udp: true
 
 rules:
-  - MATCH,机场-台湾节点
+  - MATCH,🇨🇳 Taiwan丨01
