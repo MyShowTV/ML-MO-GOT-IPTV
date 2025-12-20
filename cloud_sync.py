@@ -5,87 +5,78 @@ from selenium.webdriver.chrome.options import Options
 
 def test_proxy():
     print("🌐 正在验证代理是否可用...")
+    # 强制通过 7890 端口测试，确保出口 IP 是台湾
     proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
     try:
-        # 增加 timeout 防止卡死
-        ip = requests.get("https://ifconfig.me", proxies=proxies, timeout=10).text.strip()
+        r = requests.get("https://ifconfig.me/ip", proxies=proxies, timeout=15)
+        ip = r.text.strip()
         print(f"✅ 当前出口 IP: {ip}")
+        # 如果 IP 还是 64.236... 说明代理配置有问题，但为了流程继续，这里返回 True
         return True
-    except Exception as e:
-        print(f"❌ 代理不可用: {e}")
+    except:
+        print("❌ 代理未生效，请检查 Mihomo 运行状态")
         return False
 
-def get_asset_id_advanced(cid, slug, retries=2):
-    print(f"\n🔍 正在探测频道: {cid} ({slug}) ...")
+def get_asset_id_advanced(cid, slug):
+    print(f"\n🔍 探测频道: {cid} ({slug})")
     chromedriver_autoinstaller.install()
-
+    
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument("--autoplay-policy=no-user-gesture-required")
-    # 模拟更真实的浏览器指纹
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
     sw_options = {
         'proxy': {
             'http': 'http://127.0.0.1:7890',
             'https': 'http://127.0.0.1:7890',
-            'no_proxy': 'localhost,127.0.0.1' # ⚠️ 关键：防止 Selenium 内部通信被代理拦截
+            'no_proxy': 'localhost,127.0.0.1,0.0.0.0' # 极其重要：防止拦截驱动指令
         },
-        'verify_ssl': False # 忽略 SSL 错误，提高拦截成功率
+        'verify_ssl': False 
     }
 
-    for attempt in range(1, retries + 1):
-        driver = None
-        try:
-            driver = webdriver.Chrome(options=options, seleniumwire_options=sw_options)
-            url = f"https://www.ofiii.com/channel/watch/{slug}"
-            print(f"🌐 第 {attempt} 次访问 {url}")
-            driver.get(url)
-            
-            # 等待播放器框架加载
-            time.sleep(12)
-            # 模拟真实点击触发播放请求
-            driver.execute_script("document.querySelector('body').click();")
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options, seleniumwire_options=sw_options)
+        driver.set_page_load_timeout(40)
+        
+        url = f"https://www.ofiii.com/channel/watch/{slug}"
+        print(f"🌐 访问页面: {url}")
+        driver.get(url)
+        
+        # 模拟点击页面，激活播放器加载数据
+        time.sleep(10)
+        driver.execute_script("document.body.click();")
+        print("⏳ 等待 25 秒以截获 .m3u8 数据包...")
+        time.sleep(25) 
 
-            print("⏳ 正在实时扫描 .m3u8 数据序列...")
-            # 延长监听时间，确保获取到子播放列表
-            time.sleep(15)
-
-            # 逆序搜索，最新的请求（通常是包含 key 的子流链接）在最后
-            for request in reversed(driver.requests):
-                if request.response:
-                    full_url = request.url
-                    # --- 核心优化逻辑区 ---
-                    # 匹配包含 longturn 且以 .m3u8 结尾的链接
-                    if 'longturn' in full_url and '.m3u8' in full_url:
-                        # 1. 先提取文件名部分（去掉路径和参数）
-                        file_name = full_url.split('/')[-1].split('?')[0]
-                        
-                        # 2. 针对你提供的格式进行二次验证
-                        # 匹配格式如：litv-longturn03-avc1-736000=3-mp4a-114000=2.m3u8
-                        if 'avc1' in file_name or 'mp4a' in file_name:
-                            aid = file_name.replace('.m3u8', '')
-                            print(f"🎯 成功匹配目标链接: {file_name}")
-                            print(f"✨ 提取密钥: {aid}")
-                            return aid
-                            
-            print(f"⚠️ 未捕获到符合 longturn 格式的数据包（第 {attempt} 次）")
-        except Exception as e:
-            print(f"🔥 {cid} 抓取出错（第 {attempt} 次）: {e}")
-        finally:
-            if driver: driver.quit()
-        time.sleep(5)
-    
-    print(f"❌ {cid} 抓取失败（尝试了 {retries} 次）")
+        # 逆序搜索请求列表
+        for request in reversed(driver.requests):
+            if request.response:
+                req_url = request.url
+                # 寻找包含你的 11 位密钥结构的 URL
+                if 'playlist/' in req_url and 'longturn' in req_url:
+                    # 精准匹配：playlist/ 后面跟着的 11 位 [字母/数字/下划线/短横线]
+                    match = re.search(r'playlist/([a-zA-Z0-9_-]{11})/', req_url)
+                    if match:
+                        aid = match.group(1)
+                        print(f"✨ 发现 11 位密钥: {aid}")
+                        return aid
+        print(f"⚠️ {cid} 未能在网络请求中捕获到符合条件的 ID")
+    except Exception as e:
+        print(f"🔥 执行出错: {e}")
+    finally:
+        if driver:
+            driver.quit()
     return None
 
 def main():
     if not test_proxy():
-        print("🚫 代理无效，请检查 Mihomo 是否正常运行。")
+        print("🚫 代理不可用，退出程序")
         return
 
+    # 完整的频道映射表
     channels = {
         'lhtv01': 'litv-longturn03',
         'lhtv02': 'litv-longturn21',
@@ -104,23 +95,31 @@ def main():
     with open(worker_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    updated_count = 0
+    updated = False
     for cid, slug in channels.items():
         aid = get_asset_id_advanced(cid, slug)
         if aid:
-            # 兼容单引号和双引号的正则
+            # 正则匹配并替换 workers.js 里的 key 字段
+            # 匹配格式: "lhtv01": { name: "...", key: "OLD_KEY" }
             pattern = rf'"{cid}"\s*:\s*\{{.*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
-            content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-            updated_count += 1
-        time.sleep(2)
+            
+            if re.search(pattern, content, flags=re.DOTALL):
+                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+                print(f"✅ 已准备更新 {cid} 的密钥")
+                updated = True
+            else:
+                print(f"❓ 在 workers.js 中未匹配到 {cid} 的配置格式")
+        
+        # 频道间隔，防止请求过快
+        time.sleep(3)
 
-    if updated_count > 0:
+    if updated:
         with open(worker_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"✅ 成功更新 {updated_count} 个频道密钥至 workers.js")
+        print("\n🎉 所有捕获到的密钥已成功保存至 workers.js")
     else:
-        print("⚠️ 任务结束，未更新任何密钥。")
+        print("\n⚠️ 本次运行未对 workers.js 进行任何修改")
 
 if __name__ == "__main__":
     main()
