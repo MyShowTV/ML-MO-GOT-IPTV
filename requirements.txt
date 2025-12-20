@@ -1,5 +1,5 @@
 selenium==4.9.0
 selenium-wire==5.1.0
-blinker<1.8.0
+blinker==1.7.0
 chromedriver-autoinstaller
 requests
