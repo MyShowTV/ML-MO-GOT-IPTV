@@ -2,14 +2,13 @@ name: Ofiii-Auto-Capture
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # 每 6 小时运行一次
-  workflow_dispatch:      # 支持手动点击运行
+    - cron: '0 */6 * * *' # 每 6 小时自动执行
+  workflow_dispatch:      # 支持手动运行
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    
-    # 必须开启写入权限，否则无法更新 workers.js
+
     permissions:
       contents: write
 
@@ -17,44 +16,39 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: 启动 Mihomo 隧道
+      - name: 启动 Mihomo 并执行抓取
         run: |
-          # 1. 下载并安装 Mihomo
+          echo "===================== 🚀 初始化环境 ====================="
+          sudo apt-get update
+          sudo apt-get install -y wget curl python3 python3-pip google-chrome-stable
+          
+          echo "===================== ⚙️ 安装 Mihomo ====================="
           wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
           gunzip mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 mihomo
           chmod +x mihomo
-          
-          # 2. 启动代理并后台运行
-          # -f 指定你的机场配置文件，-d . 表示在当前目录寻找相关资源
-          ./mihomo -f clash_config.yaml -d . & 
-          
-          # 3. 等待代理启动完成
-          sleep 20
-          
-          # 4. 验证 IP 是否成功切换到台湾
-          echo "当前出口 IP 验证 (应显示为台湾机场 IP):"
-          curl -x http://127.0.0.1:7890 https://ifconfig.me
 
-      - name: 设置 Python 环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+          echo "===================== 🛰️ 启动台湾代理 ====================="
+          ./mihomo -f clash_config.yaml -d . &
+          sleep 15
 
-      - name: 安装爬虫依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
+          echo "===================== 🌏 验证代理出口 IP ====================="
+          curl -x http://127.0.0.1:7890 https://ifconfig.me || echo "代理连接失败！"
 
-      - name: 执行抓取脚本
-        run: python cloud_sync.py
+          echo "===================== 💾 安装依赖 ====================="
+          pip install -r requirements.txt
+
+          echo "===================== 🔧 设置系统代理环境变量 ====================="
+          export http_proxy=http://127.0.0.1:7890
+          export https_proxy=http://127.0.0.1:7890
+
+          echo "===================== 🧠 启动爬虫抓取密钥 ====================="
+          python3 cloud_sync.py
 
       - name: 提交并推送更新
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
           git add workers.js
-          # 如果没有变化就跳过，防止报错
-          git commit -m "Update Channels: $(date)" || exit 0
+          git commit -m "Update Channels: $(date)" || echo "没有变更，无需提交。"
           git push
