@@ -1,14 +1,12 @@
-name: IPTV Auto Capture
+name: Ofiii-Auto-Capture
 on:
   schedule:
-    - cron: '0 */2 * * *'
-  workflow_dispatch:
+    - cron: '0 */2 * * *' # 每 2 小时自动跑一次
+  workflow_dispatch: # 支持手动触发
 
 jobs:
-  run-sync:
+  build-and-run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v3
 
@@ -18,24 +16,25 @@ jobs:
           gunzip mihomo-linux-amd64-v1.18.9.gz
           mv mihomo-linux-amd64-v1.18.9 mihomo
           chmod +x mihomo
-          ./mihomo -f clash_config.yaml & 
-          sleep 15
-          # 测试代理是否通畅 (显示应为台湾 IP)
+          # 指定运行目录并启动
+          ./mihomo -f clash_config.yaml -d . & 
+          sleep 20
+          # 验证代理是否成功开启 (应显示台湾 IP)
           curl -x http://127.0.0.1:7890 https://ifconfig.me
 
-      - name: 安装依赖
+      - name: 设置环境
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller requests
+          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
 
-      - name: 执行深度抓取
+      - name: 执行抓取脚本
         run: python cloud_sync.py
 
-      - name: 推送更新
+      - name: 提交并推送
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.email "bot@github.com"
+          git config --local user.name "TV-Bot"
           git add workers.js
-          git commit -m "Auto Update Key: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Update Channels: $(date)" || exit 0
           git push
