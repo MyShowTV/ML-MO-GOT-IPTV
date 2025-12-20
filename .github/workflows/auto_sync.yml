@@ -1,63 +1,41 @@
-name: 自动同步 AssetID
-
+name: IPTV Auto Capture
 on:
   schedule:
-    - cron: '0 0,12 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
-  sync:
+  run-sync:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: 启动 Mihomo 隧道
+        run: |
+          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
+          gunzip mihomo-linux-amd64-v1.18.9.gz
+          mv mihomo-linux-amd64-v1.18.9 mihomo
+          chmod +x mihomo
+          ./mihomo -f clash_config.yaml & 
+          sleep 15
+          # 测试代理是否通畅 (显示应为台湾 IP)
+          curl -x http://127.0.0.1:7890 https://ifconfig.me
 
       - name: 安装依赖
         run: |
-          pip install selenium webdriver-manager
           sudo apt-get update
-          sudo apt-get install -y shadowsocks-libev
+          sudo apt-get install -y google-chrome-stable
+          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller requests
 
-      - name: 启动 Shadowsocks 代理
-        run: |
-          # 根据你的 config.json 对齐参数：
-          # server: 154.223.20.190
-          # port: 8388
-          # method: aes-256-gcm
-          ss-local -s 154.223.20.190 -p 8388 -k "${{ secrets.SS_PASSWORD }}" -m aes-256-gcm -l 10808 -v &
-          
-          echo "等待代理启动并测试台湾 IP..."
-          sleep 5
-          
-          # 测试代理是否通畅
-          if curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 10; then
-            echo "✅ 代理连接成功！"
-          else
-            echo "❌ 代理连接失败，请检查 VPS 防火墙（安全组）是否放行了 8388 端口的 TCP 流量"
-            exit 1
-          fi
-
-      - name: 运行同步脚本
-        env:
-          HTTPS_PROXY: http://127.0.0.1:10808
-          HTTP_PROXY: http://127.0.0.1:10808
-          NO_PROXY: localhost,127.0.0.1
+      - name: 执行深度抓取
         run: python cloud_sync.py
 
-      - name: 提交更新
+      - name: 推送更新
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "actions@github.com"
           git config --local user.name "github-actions[bot]"
-          if [[ -n "$(git status --porcelain workers.js)" ]]; then
-            git add workers.js
-            git commit -m "🤖 自动更新 AssetID"
-            git push
-          else
-            echo "无变动"
-          fi
+          git add workers.js
+          git commit -m "Auto Update Key: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git push
