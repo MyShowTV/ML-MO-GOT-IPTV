@@ -2,10 +2,9 @@ import os, re, time
 import chromedriver_autoinstaller
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
 def get_asset_id_advanced(cid, slug):
-    print(f"🔍 正在抓取频道: {cid} (Slug: {slug})...")
+    print(f"🔍 正在深入探测频道: {cid}...")
     chromedriver_autoinstaller.install()
     
     options = Options()
@@ -19,43 +18,44 @@ def get_asset_id_advanced(cid, slug):
         'proxy': {
             'http': 'http://127.0.0.1:7890',
             'https': 'http://127.0.0.1:7890',
-        },
-        'connection_timeout': 60
+        }
     }
 
     driver = None
     try:
         driver = webdriver.Chrome(options=options, seleniumwire_options=sw_options)
+        # 访问频道页
         driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
         
-        # 等待页面加载并模拟交互触发播放器
-        time.sleep(10)
-        try:
-            driver.execute_script("document.querySelector('body').click();")
-            print(f"🖱️ 已发送模拟点击触发加载...")
-        except:
-            pass
+        # 模拟点击触发播放器加载
+        time.sleep(12)
+        driver.execute_script("document.querySelector('body').click();")
         
-        time.sleep(10) # 给 10 秒缓冲时间让 m3u8 刷出来
+        print(f"⏳ 正在监听数据流 (Target: {slug})...")
+        time.sleep(15) # 给足时间让它加载你说的那个 .m3u8
 
-        # 逆序搜索请求记录，找到最新的 master.m3u8
+        # 遍历所有请求，寻找包含你提到的特征串的 URL
         for request in reversed(driver.requests):
-            if 'master.m3u8' in request.url:
-                # 兼容多种路径模式提取 AssetId
-                match = re.search(r'playlist/([a-zA-Z0-9_-]+)/', request.url)
+            url = request.url
+            # 这里的正则匹配你发现的那种带 avc1/mp4a 的 master 或 index 路径
+            if '.m3u8' in url and ('avc1' in url or 'playlist' in url):
+                # 从路径中提取那串“钥匙” (AssetID)
+                # 通常在 /playlist/ 之后，或者 /ocean/video/ 之后
+                match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', url)
                 if match:
                     aid = match.group(1)
-                    print(f"✅ 【拦截成功】 {cid} -> ID: {aid}")
+                    print(f"✨ 【发现密匙】 {cid} -> {aid}")
                     return aid
-        print(f"❌ {cid} 失败：未发现有效数据包")
+                    
+        print(f"❌ {cid} 抓取失败：未捕获到关键数据包")
     except Exception as e:
-        print(f"🔥 {cid} 报错: {e}")
+        print(f"🔥 {cid} 错误: {e}")
     finally:
         if driver: driver.quit()
     return None
 
 def main():
-    # 频道配置列表
+    # 频道对应关系
     channels = {
         'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
         'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
@@ -63,30 +63,25 @@ def main():
         'lhtv07': 'litv-longturn02'
     }
     
-    worker_file = "workers.js"
-    if not os.path.exists(worker_file):
-        print(f"🚫 找不到 {worker_file}")
-        return
-        
-    with open(worker_file, "r", encoding="utf-8") as f:
+    worker_path = "workers.js"
+    with open(worker_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    any_updated = False
+    updated = False
     for cid, slug in channels.items():
         aid = get_asset_id_advanced(cid, slug)
         if aid:
-            # 这里的正则完美匹配 workers.js 里的 JSON 结构
+            # 替换 workers.js 里的占位符
             pattern = rf'"{cid}"\s*:\s*\{{.*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
-            if re.search(pattern, content, re.DOTALL):
-                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-                any_updated = True
-        time.sleep(2) # 频道间稍微停顿
+            content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+            updated = True
+        time.sleep(2)
 
-    if any_updated:
-        with open(worker_file, "w", encoding="utf-8") as f:
+    if updated:
+        with open(worker_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 [SUCCESS] 脚本已更新 workers.js 文件内容")
+        print("✅ 全部频道密匙已更新至 workers.js")
 
 if __name__ == "__main__":
     main()
