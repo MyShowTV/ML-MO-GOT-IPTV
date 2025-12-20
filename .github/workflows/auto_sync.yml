@@ -23,6 +23,7 @@ jobs:
 
       - name: 安装依赖
         run: |
+          pip install blinker==1.7.0
           pip install selenium selenium-wire chromedriver-autoinstaller requests
 
       - name: 执行抓取脚本
