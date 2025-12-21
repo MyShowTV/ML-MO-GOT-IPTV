@@ -1,38 +1,49 @@
-name: 自动更新成都频道
+name: Ofiii-Auto-Capture-Residential
+
 on:
   schedule:
-    - cron: '0 */4 * * *' # 每 4 小时运行一次
-  workflow_dispatch:      # 支持手动触发
+    - cron: '0 */2 * * *' # 每 2 小时运行一次
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-and-run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v3
+
+      - name: 启动 Mihomo 隧道
+        run: |
+          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
+          gunzip mihomo-linux-amd64-v1.18.9.gz
+          mv mihomo-linux-amd64-v1.18.9 mihomo
+          chmod +x mihomo
+          ./mihomo -f clash_config.yaml -d . & 
+          sleep 20
+          echo "验证住宅代理 IP (应显示为台湾):"
+          curl -x http://127.0.0.1:7890 https://ifconfig.me
 
       - name: 设置 Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装 Chrome 浏览器
+      - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
 
-      - name: 安装依赖
+      - name: 执行抓取
+        run: python cloud_sync.py
+
+      - name: 提交并推送
         run: |
-          pip install blinker==1.7.0
-          pip install selenium selenium-wire chromedriver-autoinstaller requests
-
-      - name: 执行抓取脚本
-        run: python iptv_chengdu.py
-
-      - name: 提交并推送更改
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add .
-          git commit -m "自动更新成都频道地址" || exit 0
+          git config --local user.email "bot@github.com"
+          git config --local user.name "TV-Bot"
+          git add workers.js
+          git commit -m "住宅代理同步: $(date)" || exit 0
           git push
