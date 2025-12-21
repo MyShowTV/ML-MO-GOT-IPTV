@@ -1,94 +1,120 @@
-import os, re, time, requests, json, urllib3
+import os
+import time
+import json
+import re
 from datetime import datetime
+import chromedriver_autoinstaller
+from seleniumwire import webdriver # 拦截真实网络流量的关键
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-class OfiiiUltimatePro:
+class OfiiiDynamicSniper:
     def __init__(self):
-        # 你的住宅代理凭据
-        self.proxy_host = "brd.superproxy.io:33335"
+        # 你的台湾住宅代理
+        self.proxy_host = "brd.superproxy.io"
+        self.proxy_port = "33335"
         self.proxy_user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
         self.proxy_pass = "me6lrg0ysg96"
         
         self.worker_file = "workers.js"
-        # 目标频道
-        self.target = {'cid': 'lhtv01', 'slug': 'litv-longturn03'}
-
-    def sniffer(self):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 启动真机级拦截: {self.target['cid']}")
-        
-        proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}"
-        proxies = {"http": proxy_url, "https": proxy_url}
-        
-        # --- 核心配置：完全模拟真实用户行为 ---
-        headers = {
-            # 1. 开启高级渲染和浏览器指纹模拟
-            "x-api-render": "true",
-            "x-api-device": "desktop",
-            "x-api-browser": "chrome",
-            # 2. 模拟真实操作序列
-            "x-api-actions": json.dumps([
-                {"scroll_to": "window.innerHeight / 2"}, # 模拟滚动
-                {"wait": ".video-player"}, 
-                {"click": ".vjs-big-play-button"},      # 触发播放
-                {"wait": 20000}                         # 关键：必须留足时间加载真正的 m3u8
-            ]),
-            # 3. 强制要求 Bright Data 返回完整的网络日志列表
-            "x-brd-network": "true",
-            "Accept": "application/json"
+        # 待抓取的频道列表
+        self.channels = {
+            'lhtv01': 'litv-longturn03',
+            'lhtv06': 'litv-longturn01'
         }
 
+    def get_driver(self):
+        """配置带代理的真机浏览器"""
+        chromedriver_autoinstaller.install()
+        
+        # Selenium-Wire 专属代理配置
+        wire_options = {
+            'proxy': {
+                'http': f'http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}',
+                'https': f'https://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}',
+                'no_proxy': 'localhost,127.0.0.1'
+            }
+        }
+        
+        chrome_options = Options()
+        # 调试阶段建议设为 False，能看到浏览器操作；正式运行设为 True
+        chrome_options.add_argument('--headless') 
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument("--mute-audio") # 静音运行
+        
+        return webdriver.Chrome(seleniumwire_options=wire_options, options=chrome_options)
+
+    def sniff_channel(self, cid, slug):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📺 动态抓取开始: {cid} ({slug})")
+        driver = self.get_driver()
+        
         try:
-            url = f"https://www.ofiii.com/channel/watch/{self.target['slug']}"
-            # 我们请求的其实是 Bright Data 的渲染节点
-            response = requests.get(url, proxies=proxies, headers=headers, timeout=240, verify=False)
+            # 1. 访问频道页
+            driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
             
-            # 解析返回的日志。Bright Data 的网络拦截模式会返回一个包含所有 URL 的内容
-            log_data = response.text
+            # 2. 强力触发播放 (绕过所有覆盖层)
+            wait = WebDriverWait(driver, 25)
+            print("🖱️ 正在定位播放器...")
             
-            print(f"📄 流量嗅探完成，分析中... (数据量: {len(log_data)} 字节)")
+            # 寻找大播放按钮
+            play_btn = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "vjs-big-play-button")))
+            driver.execute_script("arguments[0].click();", play_btn)
+            print("🚀 已强制点击播放，进入流量拦截模式...")
 
-            # --- 模式匹配：寻找你提到的 playlist 结构 ---
-            # 模式 1: 标准 playlist 路径
-            # 模式 2: 包含 avc1 的复杂链接
-            # 模式 3: 包含 .m3u8 的任意路径
-            patterns = [
-                r'https?://[^\s"\'<>]+playlist/[a-zA-Z0-9_-]+/[^\s"\'<>]+\.m3u8',
-                r'/playlist/[a-zA-Z0-9_-]+/[^\s"\'<>]+\.m3u8',
-                r'https?://[^\s"\'<>]+litv[^\s"\'<>]*?\.m3u8'
-            ]
-            
-            found_urls = []
-            for p in patterns:
-                found_urls.extend(re.findall(p, log_data))
-            
-            # 去重并筛选
-            valid_keys = []
-            if found_urls:
-                print("\n--- 🕵️‍♂️ 拦截到的关键流量 ---")
-                for u in set(found_urls):
-                    # 提取你提到的那个“密匙/文件名”结构
-                    if "/playlist/" in u:
-                        match = re.search(r'playlist/([a-zA-Z0-9_-]+/[^"\'\s]+\.m3u8)', u)
-                        if match:
-                            key = match.group(1)
-                            valid_keys.append(key)
-                            print(f"🎯 命中！Key: {key}")
-                    else:
-                        print(f"🔗 发现相关流: {u}")
-            
-            if not valid_keys:
-                print("❌ 拦截失败。可能原因：1. 广告未跑完 2. 住宅 IP 被识别 3. 页面未正确触发点击")
-                # 最后的倔强：搜索所有包含 "avc1" 的字符串
-                if "avc1" in log_data:
-                    print("⚠️ 警告：流量中确实出现了 avc1，但正则解析失败，正在尝试强行提取...")
-                    # 强行提取 avc1 周边的字符串
-                    raw_hits = re.findall(r'([a-zA-Z0-9_-]+/litv-longturn[^\s"\'<>]+avc1[^\s"\'<>]+)', log_data)
-                    for hit in raw_hits:
-                        print(f"🔍 强行捕获: {hit}")
+            # 3. 实时监控网络封包 (监控时长 45 秒，因为广告可能很长)
+            start_time = time.time()
+            while time.time() - start_time < 45:
+                # 遍历浏览器产生的所有请求
+                for request in driver.requests:
+                    if request.response:
+                        url = request.url
+                        # 核心过滤逻辑：必须包含 playlist、avc1 和 .m3u8
+                        if 'playlist' in url and '.m3u8' in url and 'avc1' in url:
+                            print(f"🎯 截获目标 URL: {url}")
+                            
+                            # 使用正则提取 /playlist/ 后的关键部分
+                            # 例如提取: NIySmp86SwI/litv-longturn03-avc1_336000=1-mp4a_114000=2.m3u8
+                            match = re.search(r'playlist/([a-zA-Z0-9_-]+/[^?]+)', url)
+                            if match:
+                                result = match.group(1)
+                                print(f"✅ 动态提取成功: {result}")
+                                return result
+                                
+                time.sleep(3)
+                print(f"⏳ 正在监听后台流量... ({int(time.time()-start_time)}s)")
 
+            print(f"❌ {cid} 抓取超时，未发现符合条件的 playlist 请求。")
         except Exception as e:
-            print(f"🔥 系统崩溃: {e}")
+            print(f"🔥 动态抓取异常: {e}")
+        finally:
+            driver.quit()
+            # 必须清除请求历史，防止干扰下一个频道
+            # 注意：selenium-wire 会自动清理，但重启 driver 更稳妥
+        return None
+
+    def update_worker(self, cid, new_key):
+        if not os.path.exists(self.worker_file): return
+        with open(self.worker_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # 精准替换 workers.js 中的 key
+        pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
+        replacement = f'"{cid}": {{ name: "", key: "{new_key}" }}'
+        content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+        
+        with open(self.worker_file, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"📝 {cid} 已写入 workers.js")
+
+    def run(self):
+        for cid, slug in self.channels.items():
+            key = self.sniff_channel(cid, slug)
+            if key:
+                self.update_worker(cid, key)
+            time.sleep(5)
 
 if __name__ == "__main__":
-    OfiiiUltimatePro().sniffer()
+    OfiiiDynamicSniper().run()
