@@ -3,81 +3,94 @@ from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class OfiiiDeepScan:
+class OfiiiApiInterceptor:
     def __init__(self):
-        # 你的住宅代理配置 (保持不变，因为这是通的)
+        # 住宅代理凭据
         self.proxy_host = "brd.superproxy.io:33335"
         self.proxy_user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
         self.proxy_pass = "me6lrg0ysg96"
         
         self.worker_file = "workers.js"
-        # 既然都通了，我们只测试一个频道，节省时间，专注分析源码
-        self.target_channel = {'cid': 'lhtv01', 'slug': 'litv-longturn03'}
+        self.channels = {
+            'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
+            'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
+            'lhtv05': 'litv-longturn12', 'lhtv06': 'litv-longturn01',
+            'lhtv07': 'litv-longturn02'
+        }
 
-    def scan_page(self):
-        cid = self.target_channel['cid']
-        slug = self.target_channel['slug']
-        
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔬 深度解剖频道: {cid} ({slug})")
+    def intercept_m3u8(self, cid, slug):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🕵️ 拦截模式启动: {cid}")
         
         proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}"
         proxies = {"http": proxy_url, "https": proxy_url}
         
+        # --- 核心修改：让 Bright Data 像浏览器控制台一样监控网络 ---
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "x-api-render": "true",
             "x-api-actions": json.dumps([
                 {"wait": ".video-player"},
                 {"click": ".vjs-big-play-button"},
-                {"wait": 15000} # 保持长等待，确保 m3u8 加载进 DOM
+                {"wait": 15000} # 等待加载正片
             ])
         }
 
         try:
-            response = requests.get(
-                f"https://www.ofiii.com/channel/watch/{slug}",
-                proxies=proxies,
-                headers=headers,
-                timeout=180,
-                verify=False
-            )
+            # 1. 首先尝试请求主页并拦截
+            url = f"https://www.ofiii.com/channel/watch/{slug}"
+            response = requests.get(url, proxies=proxies, headers=headers, timeout=180, verify=False)
             
+            # 2. 在整个响应（包含 JS 执行后的 DOM）中深度搜索带有 avc1 的 m3u8 
+            # 刚才你提供的 ID 包含 "avc1"，我们直接以此为特征码
             content = response.text
-            print(f"📄 页面下载完成，长度: {len(content)}")
-
-            # --- 🕵️‍♂️ 侦探模式：抓取所有可疑链接 ---
             
-            print("\n--- 🔎 搜索结果 (m3u8) ---")
-            # 1. 抓取所有 .m3u8 结尾的链接 (宽泛匹配)
-            # 匹配 http 或 / 开头，直到遇到引号或空格
-            m3u8_matches = re.findall(r'["\'](https?://[^"\'\s]+\.m3u8[^"\'\s]*)["\']', content)
-            if m3u8_matches:
-                for url in m3u8_matches:
-                    print(f"🎯 发现潜在 m3u8: {url}")
-            else:
-                print("❌ 未发现标准 .m3u8 链接")
+            # 匹配包含 avc1 和 m3u8 的最长字符串
+            pattern = r'([^\s"\'<>]+avc1[^\s"\'<>]+?\.m3u8)'
+            match = re.search(pattern, content)
+            
+            if not match:
+                # 备选方案：找任何带有 litv 前缀的 m3u8
+                pattern = r'([^\s"\'<>]+litv[^\s"\'<>]+?\.m3u8)'
+                match = re.search(pattern, content)
 
-            print("\n--- 🔎 搜索结果 (包含 litv 关键词) ---")
-            # 2. 抓取所有包含 litv 的 URL (可能是 mp4 或 json)
-            litv_matches = re.findall(r'["\'](https?://[^"\'\s]*litv[^"\'\s]*)["\']', content)
-            if litv_matches:
-                for url in litv_matches:
-                    print(f"🔗 发现 litv 相关链接: {url}")
+            if match:
+                m3u8_full = match.group(1)
+                # 提取文件名部分作为 Key
+                key = m3u8_full.split('/')[-1]
+                print(f"✅ 拦截成功！Key: {key}")
+                return key
             else:
-                print("❌ 未发现 litv 相关链接")
-
-            # 3. 如果上面都没找到，打印一小段包含 'player' 的上下文
-            if not m3u8_matches and not litv_matches:
-                print("\n--- ⚠️ 源码上下文快照 ---")
-                # 找 video 标签附近的内容
-                idx = content.find('video')
-                if idx != -1:
-                    print(content[idx:idx+500])
-                else:
-                    print("未找到 video 标签")
+                print(f"❌ 页面已渲染，但流量中未发现符合 'avc1' 格式的 m3u8 链接。")
+                # 打印一小段 video 相关的源码进行最后确认
+                v_idx = content.find('video')
+                if v_idx != -1:
+                    print(f"   [Video 上下文]: {content[v_idx:v_idx+300]}")
 
         except Exception as e:
             print(f"🔥 异常: {e}")
+        return None
+
+    def run(self):
+        if not os.path.exists(self.worker_file): return
+        with open(self.worker_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        updated = False
+        for cid, slug in self.channels.items():
+            new_key = self.intercept_m3u8(cid, slug)
+            if new_key:
+                # 针对你提供的格式 (包含 = 和 空格) 的正则更新
+                pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
+                replacement = f'"{cid}": {{ name: "", key: "{new_key}" }}'
+                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+                updated = True
+            time.sleep(10)
+
+        if updated:
+            with open(self.worker_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("🚀 数据已同步到 workers.js")
+        else:
+            print("💡 未发现更新。")
 
 if __name__ == "__main__":
-    OfiiiDeepScan().scan_page()
+    OfiiiApiInterceptor().run()
