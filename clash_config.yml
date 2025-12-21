@@ -1,17 +1,1 @@
-mixed-port: 7890
-allow-lan: true
-mode: global
-log-level: info
-ipv6: false
 
-proxies:
-  - name: "BrightData_TW_DC"
-    type: http
-    server: brd.superproxy.io
-    port: 33335
-    # 用户名末尾必须带 -country-tw
-    username: "brd-customer-hl_739668d7-zone-datacenter_proxy1-country-tw"
-    password: "di168nnr7bb9"
-
-rules:
-  - MATCH,BrightData_TW_DC
