@@ -4,9 +4,18 @@ from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
 
 def get_asset_id(cid, slug):
-    print(f"🔍 正在抓取频道: {cid}...")
+    print(f"🔍 正在探测频道: {cid}...")
     chromedriver_autoinstaller.install()
     
+    # --- 代理认证配置 (直接使用你测试成功的 DC 账号) ---
+    # 核心：用户名加了 -country-tw 强制锁定台湾
+    proxy_user = "brd-customer-hl_739668d7-zone-datacenter_proxy1-country-tw"
+    proxy_pass = "di168nnr7bb9"
+    proxy_host = "brd.superproxy.io"
+    proxy_port = "33335"
+    
+    proxy_url = f'http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}'
+
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
@@ -16,8 +25,9 @@ def get_asset_id(cid, slug):
 
     sw_options = {
         'proxy': {
-            'http': 'http://127.0.0.1:7890',
-            'https': 'http://127.0.0.1:7890',
+            'http': proxy_url,
+            'https': proxy_url,
+            'no_proxy': 'localhost,127.0.0.1'
         },
         'connection_timeout': 60
     }
@@ -25,24 +35,29 @@ def get_asset_id(cid, slug):
     driver = None
     try:
         driver = webdriver.Chrome(options=options, seleniumwire_options=sw_options)
-        driver.set_page_load_timeout(50)
+        driver.set_page_load_timeout(60)
         
-        # 访问频道页
+        # 验证出口 (防止再次跑到美国)
+        print("🌍 正在验证代理出口国家...")
+        driver.get('https://geo.brdtest.com/mygeo.json')
+        print(f"🛰️ 代理返回信息: {driver.page_source}")
+
+        # 抓取 Ofiii
         driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
-        time.sleep(20) # 给数据中心代理多一点加载时间
+        time.sleep(20) # 数据中心代理响应慢，多等一会
         
-        # 模拟点击唤醒 JS
+        # 点击页面触发 JS
         driver.execute_script("document.body.click();")
-        time.sleep(5) 
+        time.sleep(5)
 
         for request in reversed(driver.requests):
             if '.m3u8' in request.url and ('playlist' in request.url or 'master' in request.url):
                 match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', request.url)
                 if match:
                     aid = match.group(1)
-                    print(f"✨ 发现 AssetID: {cid} -> {aid}")
+                    print(f"✨ 成功获取: {cid} -> {aid}")
                     return aid
-        print(f"❌ {cid} 未捕获到关键包")
+        print(f"❌ {cid} 抓取失败：未找到数据流")
     except Exception as e:
         print(f"🔥 {cid} 错误: {e}")
     finally:
@@ -76,7 +91,7 @@ def main():
     if updated:
         with open(worker_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print("✅ 同步成功！")
+        print("✅ 全部同步完成！")
 
 if __name__ == "__main__":
     main()
