@@ -8,11 +8,14 @@ on:
 jobs:
   run-sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v3
+      - name: 检出代码
+        uses: actions/checkout@v4
 
       - name: 环境初始化
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
 
@@ -22,23 +25,24 @@ jobs:
           sudo apt-get install -y google-chrome-stable
           pip install -r requirements.txt
 
-      - name: 执行可视化同步
+      - name: 执行同步
         env:
           MY_BRD_PASS: ${{ secrets.MY_BRD_PASS }}
         run: python cloud_sync_visual.py
 
-      # --- 这是你的“可视化”窗口 ---
-      - name: 打包运行快照 (查看运行画面)
+      # 解决 v3 弃用问题的关键步骤
+      - name: 上传调试快照 (可视化产物)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: Browser-Snapshots
+          name: Browser-Snapshots-${{ github.run_id }}
           path: "*.png"
+          retention-days: 5
 
-      - name: 提交并推送
+      - name: 提交更新
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add workers.js
-          git commit -m "Auto Update: $(date)" || exit 0
+          git commit -m "Auto Update AssetID: $(date)" || exit 0
           git push
