@@ -1,22 +1,16 @@
 mixed-port: 7890
 allow-lan: true
-mode: rule # 必须改为 rule 模式
+mode: global
 log-level: info
 ipv6: false
 
 proxies:
-  - name: "TW_NODE"
-    type: ss
-    server: brtlee3ogRTfxtWt.xf9pzeslxw.sbs
-    port: 17001
-    cipher: aes-256-gcm
-    password: 1d23e3c5-c047-46a0-b7d8-d838aff7ae8d
+  - name: "BrightData_TW_Resi"
+    type: http
+    server: brd.superproxy.io
+    port: 33335
+    username: brd-customer-hl_739668d7-zone-residential_proxy1
+    password: me6lrg0ysg96
 
 rules:
-  # 必须放在最前面：解决 connection refused 的核心
-  - DOMAIN-KEYWORD,localhost,DIRECT
-  - DOMAIN-SUFFIX,local,DIRECT
-  - IP-CIDR,127.0.0.0/8,DIRECT
-  - IP-CIDR,172.16.0.0/12,DIRECT
-  # 强制其余流量全部走台湾
-  - MATCH,TW_NODE
+  - MATCH,BrightData_TW_Resi
