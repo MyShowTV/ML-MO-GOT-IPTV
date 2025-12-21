@@ -4,14 +4,14 @@ mode: global
 log-level: info
 ipv6: false
 
-# 代理节点配置
 proxies:
-  - name: "BrightData_TW_Resi"
+  - name: "BrightData_TW"
     type: http
     server: brd.superproxy.io
     port: 33335
     username: brd-customer-hl_739668d7-zone-residential_proxy1
     password: me6lrg0ysg96
+    udp: false
 
 rules:
-  - MATCH,BrightData_TW_Resi
+  - MATCH,BrightData_TW
