@@ -1,21 +1,20 @@
-name: Ofiii-Auto-Capture
+name: Ofiii Auto Sync
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # 每 2 小时自动执行
-  workflow_dispatch:         # 允许手动触发
+    - cron: '0 */2 * * *'   # 每 2 小时自动运行
+  workflow_dispatch:         # 可手动触发
 
 jobs:
-  build-and-run:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: 设置 Python 环境
+      - name: 安装 Python 环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
@@ -26,15 +25,22 @@ jobs:
           sudo apt-get install -y google-chrome-stable
           pip install -r requirements.txt
 
-      - name: 执行抓取脚本
+      - name: 验证 Bright Data 凭据
+        run: |
+          curl -i --proxy brd.superproxy.io:33335 \
+               --proxy-user "${{ secrets.BD_USER }}:${{ secrets.BD_PASS }}" \
+               -k "https://geo.brdtest.com/welcome.txt?product=resi&method=native"
+
+      - name: 运行抓取脚本
         env:
-          BD_PROXY: "http://${{ secrets.BD_USER }}:${{ secrets.BD_PASS }}@brd.superproxy.io:33335"
+          BD_USER: ${{ secrets.BD_USER }}
+          BD_PASS: ${{ secrets.BD_PASS }}
         run: python cloud_sync.py
 
-      - name: 提交并推送更新
+      - name: 提交更新
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
           git add workers.js
-          git commit -m "Update Channels: $(date)" || exit 0
+          git commit -m "Update keys $(date)" || echo "No changes"
           git push
