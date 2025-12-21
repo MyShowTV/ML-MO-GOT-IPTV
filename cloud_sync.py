@@ -1,42 +1,58 @@
-import os, re, time, requests
+import os, re, time, requests, json
+import urllib3
+
+# 禁用警告信息，让日志更干净
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
     print(f"🔍 正在处理频道: {cid}...")
     
-    # --- 这里是你的准确信息 ---
-    # 记得在用户名后面加上 -country-tw 确保是台湾 IP
-    user = "brd-customer-hl_739668d7-zone-unblocker_ofiii-country-tw"
-    password = "zcg6zr5vi8qi"
-    proxy_url = f"http://{user}:{password}@brd.superproxy.io:33335"
+    # 你的 API 信息
+    API_TOKEN = "76b7e42b-9c49-4acb-819a-3f90b45be668"
+    ZONE_NAME = "unblocker_ofiii"
     
-    proxies = {
-        "http": proxy_url,
-        "https": proxy_url
+    api_url = "https://api.brightdata.com/request"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {API_TOKEN}"
     }
     
-    url = f"https://www.ofiii.com/channel/watch/{slug}"
+    # --- 核心改进：增加渲染和等待 ---
+    data = {
+        "zone": ZONE_NAME,
+        "url": f"https://www.ofiii.com/channel/watch/{slug}",
+        "format": "raw",
+        "country": "tw",
+        "render": True,           # 必须开启！模拟浏览器渲染 JS
+        "wait_for": ".video-player", # 等待播放器容器出现
+        "timeout": 60000          # 延长等待时间
+    }
 
     try:
-        # 解锁器(Unblocker)会自动渲染网页，不需要安装浏览器
-        # 我们直接请求网页源码
-        response = requests.get(url, proxies=proxies, timeout=60, verify=False)
+        # 使用 POST 方式请求 API 接口
+        response = requests.post(api_url, headers=headers, data=json.dumps(data), timeout=120, verify=False)
         
         if response.status_code == 200:
-            # 在返回的文字里寻找 AssetID
-            match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', response.text)
+            content = response.text
+            # 改进正则：Ofiii 的地址通常包含在脚本或特定的 URL 模式中
+            match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
+            
+            if not match:
+                # 备用匹配模式
+                match = re.search(r'assetId["\']:\s*["\']([^"\']+)["\']', content)
+
             if match:
                 aid = match.group(1)
-                print(f"✅ 成功获取: {cid} -> {aid}")
+                print(f"✨ 抓取成功: {cid} -> {aid}")
                 return aid
             else:
-                print(f"⚠️ 网页已打开，但没发现播放地址。")
+                # 如果没找到，打印一小段源码看看网页长什么样（方便调试）
+                print(f"⚠️ 没发现 ID。网页标题: {re.search(r'<title>(.*?)</title>', content).group(1) if '<title>' in content else '未知'}")
         else:
-            print(f"❌ 访问失败，错误码: {response.status_code}")
-            if response.status_code == 407:
-                print("💡 提示：还是认证失败，请检查 Bright Data 后台是否放开了 IP 白名单(Any)")
-                
+            print(f"❌ API 报错: {response.status_code}")
+            
     except Exception as e:
-        print(f"🔥 发生错误: {e}")
+        print(f"🔥 异常: {e}")
     return None
 
 def main():
@@ -48,9 +64,7 @@ def main():
     }
     
     worker_file = "workers.js"
-    if not os.path.exists(worker_file):
-        print("❌ 找不到 workers.js")
-        return
+    if not os.path.exists(worker_file): return
 
     with open(worker_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -59,17 +73,16 @@ def main():
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
-            # 自动寻找并替换 key: "..." 部分
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             updated = True
-        time.sleep(2)
+        time.sleep(5) # 频道之间多等一会儿
 
     if updated:
         with open(worker_file, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🎉 所有频道已同步完毕！")
+        print("🚀 workers.js 已更新！")
 
 if __name__ == "__main__":
     main()
