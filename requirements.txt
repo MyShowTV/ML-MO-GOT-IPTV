@@ -1,15 +1,15 @@
-# 界面库
-PyQt6==6.4.2
+# 基础网络与补丁
+requests
+urllib3==1.26.15
+blinker==1.7.0
 
-# 自动化与拦截
+# 自动化抓取 (固定版本防止报错)
 selenium==4.9.0
 selenium-wire==5.1.0
 chromedriver-autoinstaller
 
-# 核心补丁与网络
-blinker==1.7.0
-requests
-urllib3==1.26.15
+# 视窗界面
+PyQt6==6.4.2
 
-# 系统工具
-pyyaml  # 用于解析你的 clash_config.yml（如果需要自动化读取配置）
+# 配置文件处理
+pyyaml
