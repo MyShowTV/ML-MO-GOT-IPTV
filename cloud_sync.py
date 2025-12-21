@@ -1,75 +1,59 @@
-import os
-import re
-import time
-import requests
-import json
+import os, re, time, requests, json
 import urllib3
 
-# 1. 禁用 SSL 证书警告，保持日志清爽
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
-    """
-    通过台湾住宅代理，模拟浏览器点击播放，抓取动态生成的 AssetID
-    """
-    print(f"🔍 正在处理频道: {cid} ({slug})...")
+    print(f"🔍 正在调用 Web Unlocker + 住宅 IP 模拟点击: {cid}...")
     
-    # --- 住宅代理认证信息 (由你提供) ---
-    proxy_user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
-    proxy_pass = "me6lrg0ysg96"
-    proxy_host = "brd.superproxy.io:33335"
+    # 1. 使用 API 模式，这是唯一支持 actions (点击) 的模式
+    api_url = "https://api.brightdata.com/request"
+    # 使用你之前成功的 API Token
+    api_token = "76b7e42b-9c49-4acb-819a-3f90b45be668"
     
-    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}"
-    proxies = {
-        "http": proxy_url,
-        "https": proxy_url
-    }
-    
-    # --- 核心：通过 Header 注入自动化指令 ---
-    # 告诉 Bright Data：开启渲染 -> 点击播放 -> 等待 ID 生成
     headers = {
-        "x-api-render": "true",
-        "x-api-actions": json.dumps([
-            {"wait": ".vjs-big-play-button"},      # 等待播放按钮出现
-            {"click": ".vjs-big-play-button"},     # 模拟真实点击
-            {"wait": 6000}                         # 点击后强制等待 6 秒让链接生成
-        ])
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json"
     }
-
-    target_url = f"https://www.ofiii.com/channel/watch/{slug}"
+    
+    # 2. 构造指令：锁定台湾 + 强制住宅代理 + 执行点击
+    data = {
+        "zone": "unblocker_ofiii",     # 必须是 Web Unlocker 类型的 Zone
+        "url": f"https://www.ofiii.com/channel/watch/{slug}",
+        "format": "raw",
+        "country": "tw",
+        "proxy_type": "residential",   # 【关键】在这里指定走住宅流量
+        "render": True,
+        "actions": [
+            {"wait": ".vjs-big-play-button"}, 
+            {"click": ".vjs-big-play-button"}, 
+            {"wait": 8000}              # 住宅 IP 较慢，给足 8 秒加载时间
+        ]
+    }
 
     try:
-        # 发起请求
-        response = requests.get(
-            target_url, 
-            proxies=proxies, 
-            headers=headers, 
-            timeout=120, 
-            verify=False
-        )
+        # 注意这里是 POST 请求，直接发给 Bright Data 控制中心
+        response = requests.post(api_url, headers=headers, json=data, timeout=120)
         
         if response.status_code == 200:
             content = response.text
-            # 从返回的已渲染 HTML 中匹配 playlist/ID/
+            # 搜索 playlist/ID/
             match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
-            
             if match:
                 aid = match.group(1)
-                print(f"✅ 成功抓取 ID: {aid}")
+                print(f"✨ 成功！住宅 IP 抓取到 ID: {aid}")
                 return aid
             else:
-                print(f"⚠️ 网页已连接，但模拟点击后未发现 ID。请检查后台是否开启了 Web Unlocker 权限。")
+                # 如果没找到 ID，打印前 200 字源码，看是否返回了错误页
+                print(f"⚠️ 网页已返回，但未发现链接。预览: {content[:100].strip()}")
         else:
-            print(f"❌ 访问失败，错误码: {response.status_code}")
-            if response.status_code == 407:
-                print("💡 提示：请确保 Bright Data 后台的 IP 白名单已设为 Any。")
-                
+            print(f"❌ API 报错: {response.status_code} - {response.text[:100]}")
+            
     except Exception as e:
-        print(f"🔥 网络异常: {e}")
+        print(f"🔥 异常: {e}")
     return None
 
 def main():
-    # 需要更新的频道列表：频道名 -> 网址后缀
     channels = {
         'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
         'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
@@ -77,41 +61,25 @@ def main():
         'lhtv07': 'litv-longturn02'
     }
     
-    # 2. 定位 workers.js 文件
     worker_file = "workers.js"
-    if not os.path.exists(worker_file):
-        print(f"❌ 错误: 在当前目录下没找到 {worker_file}")
-        return
-
-    # 读取旧文件
+    if not os.path.exists(worker_file): return
     with open(worker_file, "r", encoding="utf-8") as f:
-        worker_content = f.read()
+        content = f.read()
 
-    is_any_updated = False
-    
-    # 3. 逐个频道抓取并替换
+    updated = False
     for cid, slug in channels.items():
-        new_key = get_asset_id(cid, slug)
-        
-        if new_key:
-            # 使用正则匹配替换：找到 "lhtv01": { ... key: "旧KEY" }
-            # 这里的正则兼容双引号和单引号
+        aid = get_asset_id(cid, slug)
+        if aid:
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-            replacement = f'"{cid}": {{ name: "", key: "{new_key}" }}'
-            
-            worker_content = re.sub(pattern, replacement, worker_content, flags=re.DOTALL)
-            is_any_updated = True
-        
-        # 住宅代理较慢，且为了防止被封，每个请求间隔 5 秒
-        time.sleep(5)
+            replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
+            content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+            updated = True
+        time.sleep(10) # 住宅 API 任务重，增加间隔
 
-    # 4. 如果有更新，写回文件
-    if is_any_updated:
+    if updated:
         with open(worker_file, "w", encoding="utf-8") as f:
-            f.write(worker_content)
-        print("🚀 同步成功！workers.js 已更新。")
-    else:
-        print("💡 本次未更新任何内容。")
+            f.write(content)
+        print("🚀 同步任务圆满完成！")
 
 if __name__ == "__main__":
     main()
