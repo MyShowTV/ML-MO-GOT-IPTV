@@ -1,4 +1,4 @@
-name: Ofiii-Auto-Capture
+name: Ofiii-Pure-Python-Sync
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,48 +14,21 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: 启动代理服务器
-        run: |
-          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
-          gunzip mihomo-linux-amd64-v1.18.9.gz
-          mv mihomo-linux-amd64-v1.18.9 mihomo
-          chmod +x mihomo
-          
-          # 指定当前目录运行，强制加载本地 clash_config.yaml
-          ./mihomo -f ./clash_config.yaml -d . > mihomo.log 2>&1 &
-          
-          echo "等待代理启动..."
-          sleep 40
-          
-          echo "=== 代理日志 (检查是否有报错) ==="
-          cat mihomo.log
-          
-          echo "=== 最终出口验证 ==="
-          # 如果这里不是 TW，我们通过返回错误让任务在这里停止，不浪费住宅流量
-          CHECK_RES=$(curl -s -x http://127.0.0.1:7890 "https://geo.brdtest.com/welcome.txt?product=resi&method=native")
-          echo "$CHECK_RES"
-          if [[ "$CHECK_RES" == *"Country: TW"* ]]; then
-            echo "✅ 成功切换至台湾机房"
-          else
-            echo "❌ 失败：出口仍显示为非台湾地区，任务终止"
-            exit 1
-          fi
-
-      - name: 安装 Python 与爬虫环境
+      - name: 设置 Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装依赖
+      - name: 安装环境
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
           pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
 
-      - name: 执行抓取 (云端同步)
+      - name: 运行爬虫
         run: python cloud_sync.py
 
-      - name: 自动推送更新
+      - name: 推送更新
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
