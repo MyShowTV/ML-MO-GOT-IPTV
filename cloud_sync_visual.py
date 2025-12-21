@@ -9,7 +9,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 class OfiiiVisualSync:
     def __init__(self):
-        # 解决凭据报错的核心：URL 编码
+        # 核心修复：对代理账号密码进行编码，解决 Invalid credentials 报错
         raw_pass = os.getenv('MY_BRD_PASS', 'me6lrg0ysg96').strip()
         self.proxy_user = urllib.parse.quote_plus("brd-customer-hl_739668d7-zone-residential_proxy1-country-tw")
         self.proxy_pass = urllib.parse.quote_plus(raw_pass)
@@ -27,43 +27,40 @@ class OfiiiVisualSync:
         }
         
         chrome_options = Options()
-        chrome_options.add_argument('--headless') # 云端必须
+        chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--window-size=1280,720')
         chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
         return webdriver.Chrome(seleniumwire_options=wire_options, options=chrome_options)
 
     def run(self):
         driver = self.get_driver()
-        channels = {'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21'}
+        channels = {
+            'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
+            'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
+            'lhtv05': 'litv-longturn12', 'lhtv06': 'litv-longturn01',
+            'lhtv07': 'litv-longturn02'
+        }
         results = {}
-
-        print(f"🎬 [可视化监控] 任务启动时间: {datetime.now()}")
 
         try:
             for cid, slug in channels.items():
-                print(f"\n--- 🛰️ 正在进入频道可视化嗅探: {cid} ---")
+                print(f"🔎 正在进入频道: {slug}")
                 driver.get(f"https://www.ofiii.com/channel/watch/{slug}")
-                
-                # 记录状态 1：加载完成
-                driver.save_screenshot(f"1_{cid}_loaded.png")
-                print(f"📸 [截图] 页面已加载，保存为 1_{cid}_loaded.png")
+                time.sleep(5)
+                driver.save_screenshot(f"step1_{cid}_load.png") # 截图：加载完成
 
                 try:
                     wait = WebDriverWait(driver, 30)
                     play_btn = wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "vjs-big-play-button")))
-                    
-                    # 模拟人类点击
                     driver.execute_script("arguments[0].click();", play_btn)
-                    print(f"🖱️ [操作] 已点击播放按钮...")
-                    
-                    # 记录状态 2：点击后画面
-                    time.sleep(5)
-                    driver.save_screenshot(f"2_{cid}_playing.png")
-                    
-                    # 流量截获
+                    print(f"▶️ 已触发播放...")
+                    time.sleep(8)
+                    driver.save_screenshot(f"step2_{cid}_play.png") # 截图：播放中
+
                     found = False
                     start_wait = time.time()
                     while time.time() - start_wait < 40:
@@ -72,28 +69,22 @@ class OfiiiVisualSync:
                                 match = re.search(r'playlist/([a-zA-Z0-9_-]+/[^?#\s]+)', req.url)
                                 if match:
                                     res = match.group(1)
-                                    print(f"🎯 [捕获成功] {cid} -> {res}")
+                                    print(f"🎯 捕获成功: {res}")
                                     results[cid] = res
                                     found = True; break
                         if found: break
                         time.sleep(3)
-                    
-                    if not found:
-                        print(f"⚠️ [捕获失败] {cid} 在 40 秒内未产生符合条件的流量包")
-                        driver.save_screenshot(f"ERR_{cid}_not_found.png")
-
                 except Exception as e:
-                    print(f"🔥 [运行时错误] {cid}: {str(e)}")
-                    driver.save_screenshot(f"ERR_{cid}_exception.png")
+                    print(f"❌ {cid} 抓取异常")
+                    driver.save_screenshot(f"error_{cid}.png")
 
-            # 更新文件
             self.save_to_worker(results)
-            
         finally:
             driver.quit()
 
     def save_to_worker(self, results):
         if not results: return
+        if not os.path.exists(self.worker_file): return
         with open(self.worker_file, "r", encoding="utf-8") as f:
             data = f.read()
         for cid, val in results.items():
@@ -101,7 +92,7 @@ class OfiiiVisualSync:
             data = re.sub(pattern, f'"{cid}": {{ name: "", key: "{val}" }}', data, flags=re.DOTALL)
         with open(self.worker_file, "w", encoding="utf-8") as f:
             f.write(data)
-        print(f"\n💾 [存储] 已将 {len(results)} 个新 Key 同步至 {self.worker_file}")
+        print(f"💾 数据已同步至 {self.worker_file}")
 
 if __name__ == "__main__":
     OfiiiVisualSync().run()
