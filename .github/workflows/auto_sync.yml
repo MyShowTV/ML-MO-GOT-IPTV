@@ -3,7 +3,7 @@ name: IPTV Auto Capture
 on:
   schedule:
     - cron: '0 */6 * * *' # 每6小时跑一次
-  workflow_dispatch:      # 允许手动运行
+  workflow_dispatch:      # 允许手动点击运行
 
 jobs:
   run-task:
@@ -13,34 +13,35 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: 安装 Python 环境
+      - name: 设置 Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装 Chrome 浏览器
+      - name: 安装系统依赖 (Chrome)
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: 安装运行插件 (动态抓取必备)
+      - name: 安装 Python 依赖包 (含版本修复)
         run: |
           python -m pip install --upgrade pip
+          pip install blinker==1.7.0          # 核心修复：防止 _saferef 报错
           pip install selenium==4.9.0
           pip install selenium-wire==5.1.0
           pip install chromedriver-autoinstaller
           pip install requests
           pip install urllib3==1.26.15
 
-      - name: 开始同步
+      - name: 执行动态抓取脚本
         env:
           MY_BRD_PASS: ${{ secrets.MY_BRD_PASS }}
         run: python cloud_sync.py
 
-      - name: 把结果存回仓库
+      - name: 自动提交更新
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add workers.js
-          git commit -m "自动更新 AssetID: $(date)" || exit 0
+          git commit -m "自动同步最新播放密匙: $(date)" || exit 0
           git push
