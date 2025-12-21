@@ -1,53 +1,49 @@
-import os, re, time, requests, json
+import os, re, time, requests
 import urllib3
 
-# 禁用证书警告
+# 禁用红色的证书警告，让日志更整洁
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
     print(f"🔍 正在处理频道: {cid}...")
     
-    # --- 核心配置：必须准确 ---
-    # 这是你提供的 API Token
-    API_TOKEN = "76b7e42b-9c49-4acb-819a-3f90b45be668"
-    ZONE_NAME = "unblocker_ofiii"
+    # --- 填入你截图中的准确信息 ---
+    # 住宅代理用户名后加 -country-tw 强制使用台湾 IP
+    user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
+    password = "me6lrg0ysg96"
     
-    api_url = "https://api.brightdata.com/request"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_TOKEN}"
+    # 构造代理 URL
+    proxy_url = f"http://{user}:{password}@brd.superproxy.io:33335"
+    
+    proxies = {
+        "http": proxy_url,
+        "https": proxy_url
     }
     
-    # 指令包：强制渲染并等待视频播放器
-    data = {
-        "zone": ZONE_NAME,
-        "url": f"https://www.ofiii.com/channel/watch/{slug}",
-        "format": "raw",
-        "country": "tw",
-        "render": True,           # 开启云浏览器渲染
-        "wait_for": "video",      # 关键：等视频组件加载出来
-        "timeout": 40000          # 40秒超时
-    }
+    target_url = f"https://www.ofiii.com/channel/watch/{slug}"
 
     try:
-        # 向 Bright Data 发送 POST 请求
-        response = requests.post(api_url, headers=headers, json=data, timeout=120, verify=False)
+        # 使用住宅代理发起请求
+        # 住宅代理模仿真实用户，Ofiii 极难拦截
+        response = requests.get(target_url, proxies=proxies, timeout=60, verify=False)
         
         if response.status_code == 200:
             content = response.text
-            # 正则搜索 playlist/ID/
+            # 搜索网页代码里的 AssetID
             match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
             if match:
                 aid = match.group(1)
-                print(f"✅ 成功提取: {aid}")
+                print(f"✅ 提取成功: {aid}")
                 return aid
             else:
-                print("⚠️ 网页已打开，但没发现 ID。可能需要检查 Ofiii 是否改版。")
+                print(f"⚠️ 网页已连接，但没搜到 ID。可能需要后台开启『Web Unlocker』功能。")
         else:
-            print(f"❌ API 报错: {response.status_code} - {response.text}")
+            print(f"❌ 访问失败，错误码: {response.status_code}")
+            if response.status_code == 407:
+                print("💡 提示：407 代表密码错了，或者没在后台把白名单设为 Any")
             
     except Exception as e:
-        print(f"🔥 异常: {e}")
+        print(f"🔥 发生异常: {e}")
     return None
 
 def main():
@@ -70,17 +66,17 @@ def main():
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
-            # 自动替换 workers.js 里的 key: "..."
+            # 替换 workers.js 中的 key 值
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             updated = True
-        time.sleep(5) 
+        time.sleep(3) # 住宅代理稍微等一下更安全
 
     if updated:
         with open(worker_file, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 workers.js 更新完毕！")
+        print("🚀 同步完成，workers.js 已更新！")
 
 if __name__ == "__main__":
     main()
