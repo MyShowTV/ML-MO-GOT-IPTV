@@ -1,13 +1,14 @@
 import os, re, time, requests, json
 import urllib3
 
-# 禁用警告信息，让日志更干净
+# 禁用证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
     print(f"🔍 正在处理频道: {cid}...")
     
-    # 你的 API 信息
+    # --- 核心配置：必须准确 ---
+    # 这是你提供的 API Token
     API_TOKEN = "76b7e42b-9c49-4acb-819a-3f90b45be668"
     ZONE_NAME = "unblocker_ofiii"
     
@@ -17,39 +18,33 @@ def get_asset_id(cid, slug):
         "Authorization": f"Bearer {API_TOKEN}"
     }
     
-    # --- 核心改进：增加渲染和等待 ---
+    # 指令包：强制渲染并等待视频播放器
     data = {
         "zone": ZONE_NAME,
         "url": f"https://www.ofiii.com/channel/watch/{slug}",
         "format": "raw",
         "country": "tw",
-        "render": True,           # 必须开启！模拟浏览器渲染 JS
-        "wait_for": ".video-player", # 等待播放器容器出现
-        "timeout": 60000          # 延长等待时间
+        "render": True,           # 开启云浏览器渲染
+        "wait_for": "video",      # 关键：等视频组件加载出来
+        "timeout": 40000          # 40秒超时
     }
 
     try:
-        # 使用 POST 方式请求 API 接口
-        response = requests.post(api_url, headers=headers, data=json.dumps(data), timeout=120, verify=False)
+        # 向 Bright Data 发送 POST 请求
+        response = requests.post(api_url, headers=headers, json=data, timeout=120, verify=False)
         
         if response.status_code == 200:
             content = response.text
-            # 改进正则：Ofiii 的地址通常包含在脚本或特定的 URL 模式中
+            # 正则搜索 playlist/ID/
             match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
-            
-            if not match:
-                # 备用匹配模式
-                match = re.search(r'assetId["\']:\s*["\']([^"\']+)["\']', content)
-
             if match:
                 aid = match.group(1)
-                print(f"✨ 抓取成功: {cid} -> {aid}")
+                print(f"✅ 成功提取: {aid}")
                 return aid
             else:
-                # 如果没找到，打印一小段源码看看网页长什么样（方便调试）
-                print(f"⚠️ 没发现 ID。网页标题: {re.search(r'<title>(.*?)</title>', content).group(1) if '<title>' in content else '未知'}")
+                print("⚠️ 网页已打开，但没发现 ID。可能需要检查 Ofiii 是否改版。")
         else:
-            print(f"❌ API 报错: {response.status_code}")
+            print(f"❌ API 报错: {response.status_code} - {response.text}")
             
     except Exception as e:
         print(f"🔥 异常: {e}")
@@ -64,7 +59,9 @@ def main():
     }
     
     worker_file = "workers.js"
-    if not os.path.exists(worker_file): return
+    if not os.path.exists(worker_file):
+        print("❌ 错误: 找不到 workers.js")
+        return
 
     with open(worker_file, "r", encoding="utf-8") as f:
         content = f.read()
@@ -73,16 +70,17 @@ def main():
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
+            # 自动替换 workers.js 里的 key: "..."
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             updated = True
-        time.sleep(5) # 频道之间多等一会儿
+        time.sleep(5) 
 
     if updated:
         with open(worker_file, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 workers.js 已更新！")
+        print("🚀 workers.js 更新完毕！")
 
 if __name__ == "__main__":
     main()
