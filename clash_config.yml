@@ -1,12 +1,5 @@
-port: 7890
-socks-port: 7891
-allow-lan: true
-mode: rule
-log-level: info
-external-controller: 127.0.0.1:9090
-
 proxies:
-  - name: "台湾住宅IP"
+  - name: "台湾住宅"
     type: http
     server: brd.superproxy.io
     port: 33335
@@ -14,21 +7,13 @@ proxies:
     password: me6lrg0ysg96
 
 proxy-groups:
-  - name: 🎥 视频抓取分流
+  - name: "OFIII-抓取"
     type: select
     proxies:
-      - "台湾住宅IP"
+      - "台湾住宅"
       - DIRECT
 
 rules:
-  # Ofiii 相关域名强制走台湾代理
-  - DOMAIN-SUFFIX,ofiii.com,🎥 视频抓取分流
-  - DOMAIN-SUFFIX,litv.tv,🎥 视频抓取分流
-  - DOMAIN-KEYWORD,ofiii,🎥 视频抓取分流
-  
-  # 必须确保播放流 cdi.ofiii.com 也走代理
-  - DOMAIN,cdi.ofiii.com,🎥 视频抓取分流
-  
-  # 其他流量直连（节省代理流量）
-  - GEOIP,CN,DIRECT
+  - DOMAIN-SUFFIX,ofiii.com,OFIII-抓取
+  - DOMAIN-SUFFIX,litv.tv,OFIII-抓取
   - MATCH,DIRECT
