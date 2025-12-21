@@ -19,26 +19,19 @@ export default {
     }
 
     const m3u8Url = `https://cdi.ofiii.com/ocean/video/playlist/${ch.key}/master.m3u8`;
-    
     const res = await fetch(m3u8Url, {
       headers: {
         "Referer": "https://www.ofiii.com/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       }
     });
-    
     let text = await res.text();
     const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
-    
-    // 修复相对路径为绝对路径
-    const fixedText = text.split('\n').map(line => {
-      if (line.trim() && !line.startsWith('#') && !line.startsWith('http')) {
-        return baseUrl + line;
-      }
+    const fixed = text.split('\n').map(line => {
+      if (line.trim() && !line.startsWith('#') && !line.startsWith('http')) return baseUrl + line;
       return line;
     }).join('\n');
-
-    return new Response(fixedText, {
+    return new Response(fixed, {
       headers: {
         "Content-Type": "application/vnd.apple.mpegurl",
         "Access-Control-Allow-Origin": "*",
