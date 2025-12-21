@@ -5,13 +5,13 @@ log-level: info
 ipv6: false
 
 proxies:
-  - name: "BrightData_TW_Resi"
+  - name: "BrightData_TW"
     type: http
     server: brd.superproxy.io
     port: 33335
-    # 关键：这里必须和你 curl 测试成功的字符串完全一致
+    # 账号必须加引号，且必须带上国家后缀
     username: "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
     password: "me6lrg0ysg96"
 
 rules:
-  - MATCH,BrightData_TW_Resi
+  - MATCH,BrightData_TW
