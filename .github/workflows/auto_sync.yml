@@ -1,46 +1,48 @@
-name: Ofiii Auto Sync
+name: Ofiii-Auto-Capture
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # 每 2 小时自动运行
-  workflow_dispatch:         # 可手动触发
+    - cron: '0 */2 * * *' # 每 2 小时自动跑一次
+  workflow_dispatch:      # 允许你手动点击运行
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - uses: actions/checkout@v3
+      - name: 检出代码
+        uses: actions/checkout@v3
+
+      - name: 启动代理
+        run: |
+          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
+          gunzip mihomo-linux-amd64-v1.18.9.gz
+          mv mihomo-linux-amd64-v1.18.9 mihomo
+          chmod +x mihomo
+          ./mihomo -f clash_config.yaml -d . > mihomo.log 2>&1 &
+          sleep 30
+          echo "=== 代理验证 ==="
+          curl -s -x http://127.0.0.1:7890 https://geo.brdtest.com/welcome.txt?product=resi&method=native | grep "Country:"
 
       - name: 安装 Python 环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装依赖
+      - name: 安装爬虫依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-          pip install -r requirements.txt
+          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
 
-      - name: 验证 Bright Data 凭据
-        run: |
-          curl -i --proxy brd.superproxy.io:33335 \
-               --proxy-user "${{ secrets.BD_USER }}:${{ secrets.BD_PASS }}" \
-               -k "https://geo.brdtest.com/welcome.txt?product=resi&method=native"
-
-      - name: 运行抓取脚本
-        env:
-          BD_USER: ${{ secrets.BD_USER }}
-          BD_PASS: ${{ secrets.BD_PASS }}
+      - name: 执行抓取
         run: python cloud_sync.py
 
-      - name: 提交更新
+      - name: 提交结果
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
           git add workers.js
-          git commit -m "Update keys $(date)" || echo "No changes"
+          git commit -m "Auto Update: $(date)" || exit 0
           git push
