@@ -1,4 +1,4 @@
-name: IPTV Auto Sync
+name: IPTV Visual Capture Pro
 
 on:
   schedule:
@@ -6,27 +6,39 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  run-sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Setup Python
+
+      - name: 环境初始化
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install Chrome
-        run: sudo apt-get install -y google-chrome-stable
-      - name: Install Deps
+
+      - name: 安装 Chrome & 依赖
         run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
           pip install -r requirements.txt
-      - name: Run Sync
+
+      - name: 执行可视化同步
         env:
           MY_BRD_PASS: ${{ secrets.MY_BRD_PASS }}
-        run: python cloud_sync.py
-      - name: Commit
+        run: python cloud_sync_visual.py
+
+      # --- 这是你的“可视化”窗口 ---
+      - name: 打包运行快照 (查看运行画面)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: Browser-Snapshots
+          path: "*.png"
+
+      - name: 提交并推送
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "Github Action"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add workers.js
-          git commit -m "Update Keys $(date)" || exit 0
+          git commit -m "Auto Update: $(date)" || exit 0
           git push
