@@ -3,14 +3,14 @@ from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class OfiiiDebugger:
+class OfiiiFinalSolution:
     def __init__(self):
-        # --- 建议检查点：API_TOKEN 是否包含前后空格？Zone 名字是否带下划线？ ---
-        self.api_token = "76b7e42b-9c49-4acb-819a-3f90b45be668"
-        self.zone_name = "unblocker_ofiii"
-        self.api_url = "https://api.brightdata.com/request"
-        self.worker_file = "workers.js"
+        # --- 使用你截图里确认成功的住宅代理凭据 ---
+        self.proxy_host = "brd.superproxy.io:33335"
+        self.proxy_user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
+        self.proxy_pass = "me6lrg0ysg96"
         
+        self.worker_file = "workers.js"
         self.channels = {
             'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
             'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
@@ -18,99 +18,66 @@ class OfiiiDebugger:
             'lhtv07': 'litv-longturn02'
         }
 
-    def log(self, step, message, status="INFO"):
-        curr_time = datetime.now().strftime('%H:%M:%S')
-        print(f"[{curr_time}] [{status}] Stage: {step} >> {message}")
-
-    def debug_asset_id(self, cid, slug):
-        self.log("INIT", f"开始处理频道 {cid} (URL: {slug})")
+    def get_asset_id(self, cid, slug):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 启动住宅代理模拟: {cid}")
         
+        proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}"
+        proxies = {"http": proxy_url, "https": proxy_url}
+        
+        # 使用 Header 注入指令，绕过 API Token 验证
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_token}"
-        }
-        
-        payload = {
-            "zone": self.zone_name,
-            "url": f"https://www.ofiii.com/channel/watch/{slug}",
-            "format": "raw",
-            "country": "tw",
-            "render": True,
-            "actions": [
-                {"wait": ".video-player"},
+            "x-api-render": "true", # 启用云端浏览器渲染
+            "x-api-actions": json.dumps([
+                {"wait": ".vjs-big-play-button"},
                 {"click": ".vjs-big-play-button"},
-                {"wait": 10000}
-            ]
+                {"wait": 12000} # 给足时间加载 m3u8
+            ])
         }
 
         try:
-            self.log("AUTH", f"正在发送请求到 Bright Data API... (Zone: {self.zone_name})")
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
+            # 这里的 URL 是目标网页，认证信息在代理链接里
+            response = requests.get(
+                f"https://www.ofiii.com/channel/watch/{slug}",
+                proxies=proxies,
+                headers=headers,
+                timeout=180,
+                verify=False
+            )
             
-            # --- 环节 1: 权限验证 ---
-            if response.status_code == 401:
-                self.log("AUTH", "❌ 认证失败 (401)！原因：API Token 无效或已过期。", "ERROR")
-                print(f"   [调试信息] 请核对后台 Token 列表，当前使用的是: {self.api_token[:8]}****")
-                return None
-            
-            if response.status_code == 403:
-                self.log("AUTH", "❌ 权限拒绝 (403)！原因：可能 Zone 名字写错，或者账户余额不足。", "ERROR")
-                return None
-
-            # --- 环节 2: 渲染状态 ---
-            self.log("RENDER", f"API 握手成功 (HTTP {response.status_code})，正在解析返回内容...")
-            
-            content = response.text
-            if not content:
-                self.log("DATA", "❌ 网页返回为空，浏览器可能未能成功加载页面。", "ERROR")
-                return None
-
-            # --- 环节 3: 模拟点击与 ID 提取 ---
-            self.log("SCRAPE", "正在搜索 HTML 源码中的 AssetID 模式...")
-            match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
-            
-            if match:
-                aid = match.group(1)
-                self.log("SCRAPE", f"✨ 提取成功！ID: {aid}", "SUCCESS")
-                return aid
+            if response.status_code == 200:
+                # 提取 AssetID
+                match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', response.text)
+                if match:
+                    aid = match.group(1)
+                    print(f"✨ 提取成功: {aid}")
+                    return aid
+                else:
+                    print(f"⚠️ 网页已打开但未找到 ID。长度: {len(response.text)}")
             else:
-                self.log("SCRAPE", "⚠️ 未能找到 ID。可能是点击动作未触发，或网页结构变动。", "WARNING")
-                # 打印一小段源码辅助判断
-                print(f"   [源码预览]: {content[:200].replace('', '')}...")
-                
+                print(f"❌ 错误码: {response.status_code}。请确认后台白名单是否设为 Any。")
         except Exception as e:
-            self.log("SYSTEM", f"🔥 发生网络崩溃或代码错误: {str(e)}", "CRITICAL")
-        
+            print(f"🔥 请求异常: {e}")
         return None
 
-    def start(self):
-        self.log("START", "==== 自动化任务调试启动 ====")
-        if not os.path.exists(self.worker_file):
-            self.log("FILE", f"找不到 {self.worker_file}", "ERROR")
-            return
-
+    def run(self):
+        if not os.path.exists(self.worker_file): return
         with open(self.worker_file, "r", encoding="utf-8") as f:
             content = f.read()
 
-        updated_count = 0
+        updated = False
         for cid, slug in self.channels.items():
-            new_id = self.debug_asset_id(cid, slug)
-            if new_id:
+            aid = self.get_asset_id(cid, slug)
+            if aid:
                 pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-                replacement = f'"{cid}": {{ name: "", key: "{new_id}" }}'
+                replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
                 content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-                updated_count += 1
-            
-            print("-" * 50)
-            time.sleep(5)
+                updated = True
+            time.sleep(10)
 
-        if updated_count > 0:
+        if updated:
             with open(self.worker_file, "w", encoding="utf-8") as f:
                 f.write(content)
-            self.log("END", f"任务结束。更新了 {updated_count} 个频道。", "SUCCESS")
-        else:
-            self.log("END", "任务结束。没有数据被更新。", "INFO")
+            print("🚀 [DONE] workers.js 更新成功！")
 
 if __name__ == "__main__":
-    debugger = OfiiiDebugger()
-    debugger.start()
+    OfiiiFinalSolution().run()
