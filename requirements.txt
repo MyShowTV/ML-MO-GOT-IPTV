@@ -1,15 +1,7 @@
-# 基础网络与补丁
-requests
-urllib3==1.26.15
-blinker==1.7.0
-
-# 自动化抓取 (固定版本防止报错)
+PyQt6==6.4.2
 selenium==4.9.0
 selenium-wire==5.1.0
 chromedriver-autoinstaller
-
-# 视窗界面
-PyQt6==6.4.2
-
-# 配置文件处理
-pyyaml
+blinker==1.7.0
+requests
+urllib3==1.26.15
