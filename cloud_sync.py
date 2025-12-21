@@ -4,11 +4,9 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
-    print(f"🔍 正在调用 Web Unlocker + 住宅 IP 模拟点击: {cid}...")
+    print(f"🔍 正在深度探测频道: {cid}...")
     
-    # 1. 使用 API 模式，这是唯一支持 actions (点击) 的模式
     api_url = "https://api.brightdata.com/request"
-    # 使用你之前成功的 API Token
     api_token = "76b7e42b-9c49-4acb-819a-3f90b45be668"
     
     headers = {
@@ -16,41 +14,50 @@ def get_asset_id(cid, slug):
         "Content-Type": "application/json"
     }
     
-    # 2. 构造指令：锁定台湾 + 强制住宅代理 + 执行点击
+    # 构建更真实的模拟环境
     data = {
-        "zone": "unblocker_ofiii",     # 必须是 Web Unlocker 类型的 Zone
+        "zone": "unblocker_ofiii",
         "url": f"https://www.ofiii.com/channel/watch/{slug}",
         "format": "raw",
         "country": "tw",
-        "proxy_type": "residential",   # 【关键】在这里指定走住宅流量
+        "proxy_type": "residential", # 坚持走住宅 IP
         "render": True,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "actions": [
-            {"wait": ".vjs-big-play-button"}, 
+            # 1. 等待视频容器加载
+            {"wait": ".video-player"}, 
+            # 2. 尝试点击多个可能的播放按钮标识符 (增加容错)
             {"click": ".vjs-big-play-button"}, 
-            {"wait": 8000}              # 住宅 IP 较慢，给足 8 秒加载时间
+            {"click": "button[aria-label='Play']"},
+            # 3. 强制等待，让 JS 把 m3u8 地址写进 HTML
+            {"wait": 8000}
         ]
     }
 
     try:
-        # 注意这里是 POST 请求，直接发给 Bright Data 控制中心
-        response = requests.post(api_url, headers=headers, json=data, timeout=120)
+        response = requests.post(api_url, headers=headers, json=data, timeout=150)
         
         if response.status_code == 200:
             content = response.text
-            # 搜索 playlist/ID/
+            
+            # 匹配模式1: 常见的 playlist 链接
             match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
+            if not match:
+                # 匹配模式2: 源码中的 assetId 变量
+                match = re.search(r'assetId["\']\s*:\s*["\']([^"\']+)["\']', content)
+            
             if match:
                 aid = match.group(1)
-                print(f"✨ 成功！住宅 IP 抓取到 ID: {aid}")
+                print(f"✨ 抓取成功: {cid} -> {aid}")
                 return aid
             else:
-                # 如果没找到 ID，打印前 200 字源码，看是否返回了错误页
-                print(f"⚠️ 网页已返回，但未发现链接。预览: {content[:100].strip()}")
+                # 打印一小段源码进行调试，看看是否被跳到了 403 页面
+                print(f"⚠️ 无法匹配 ID。返回内容片段: {content[:150].strip()}")
         else:
-            print(f"❌ API 报错: {response.status_code} - {response.text[:100]}")
+            print(f"❌ API 状态异常: {response.status_code}")
             
     except Exception as e:
-        print(f"🔥 异常: {e}")
+        print(f"🔥 运行异常: {e}")
     return None
 
 def main():
@@ -66,20 +73,21 @@ def main():
     with open(worker_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    updated = False
+    is_any_updated = False
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
+            # 更新 workers.js 里的 key
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-            updated = True
-        time.sleep(10) # 住宅 API 任务重，增加间隔
+            is_any_updated = True
+        time.sleep(12) # 住宅+渲染非常耗资源，频道间距拉长
 
-    if updated:
+    if is_any_updated:
         with open(worker_file, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 同步任务圆满完成！")
+        print("🚀 workers.js 更新已推送到文件！")
 
 if __name__ == "__main__":
     main()
