@@ -1,40 +1,31 @@
-name: Ofiii-Auto-Sync-Direct
+name: 自动更新频道Key
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # 每6小时跑一次
+  workflow_dispatch:      # 允许你手动点击运行
 
 jobs:
-  run-sync:
+  run-task:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
-
-      - name: 设置 Python
+      - uses: actions/checkout@v3
+      - name: 安装 Python 环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
-      - name: 安装 Chrome 浏览器
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-
-      - name: 安装依赖
-        run: |
-          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
-
-      - name: 启动爬虫
+      - name: 安装运行插件
+        run: pip install requests
+      - name: 开始同步
+        env:
+          MY_BRD_PASS: ${{ secrets.MY_BRD_PASS }}
         run: python cloud_sync.py
-
-      - name: 提交并同步
+      - name: 把结果存回仓库
         run: |
-          git config --local user.email "bot@github.com"
-          git config --local user.name "TV-Bot"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add workers.js
-          git commit -m "Direct Proxy Update: $(date)" || exit 0
+          git commit -m "自动更新 AssetID: $(date)" || exit 0
           git push
