@@ -3,94 +3,66 @@ from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class OfiiiFinalHunter:
+class OfiiiNetworkSniffer:
     def __init__(self):
-        # 住宅代理凭据
         self.proxy_host = "brd.superproxy.io:33335"
         self.proxy_user = "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
         self.proxy_pass = "me6lrg0ysg96"
         
         self.worker_file = "workers.js"
-        # 频道映射
-        self.channels = {
-            'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
-            'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
-            'lhtv05': 'litv-longturn12', 'lhtv06': 'litv-longturn01',
-            'lhtv07': 'litv-longturn02'
-        }
+        self.channels = {'lhtv01': 'litv-longturn03'} # 先拿一个频道测试
 
-    def capture_secret_key(self, cid, slug):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛡️ 正在攻克频道: {cid} ({slug})")
+    def get_key_via_network_logs(self, cid, slug):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 启动深度网络嗅探: {cid}")
         
         proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}"
         proxies = {"http": proxy_url, "https": proxy_url}
         
-        # 指令：开启浏览器渲染 + 执行点击 + 捕获网络日志
+        # 核心：使用 x-brd-network 指令，这会要求代理返回所有网络请求的 JSON 列表
         headers = {
             "x-api-render": "true",
             "x-api-actions": json.dumps([
-                {"wait": ".video-player"},
+                {"wait": ".vjs-big-play-button"},
                 {"click": ".vjs-big-play-button"},
-                {"wait": 15000}  # 给足 15 秒让浏览器发出 m3u8 请求
-            ])
+                {"wait": 15000} # 必须等待，让 m3u8 请求发出来
+            ]),
+            "x-brd-network": "true" # 强制开启网络包嗅探
         }
 
         try:
             url = f"https://www.ofiii.com/channel/watch/{slug}"
             response = requests.get(url, proxies=proxies, headers=headers, timeout=180, verify=False)
             
-            # 在返回的所有内容（包括网络日志快照）中搜索 /playlist/ 结构
+            # Bright Data 会在 response body 或 header 中提供网络请求日志
+            # 如果配置正确，这些 URL 会直接出现在文本中
             content = response.text
             
-            # 正则 A：提取完整结构 /playlist/密匙/文件名.m3u8
-            # 兼容你提供的格式： NIySmp86SwI/litv-longturn03-avc1_336000=1-mp4a_114000=2.m3u8
-            pattern = r'playlist/([a-zA-Z0-9_-]+)/([^"\'\s]+\.m3u8)'
-            match = re.search(pattern, content)
+            # 搜索包含 /playlist/ 的链接
+            # 这次我们找得更宽泛，只要包含 playlist 且以 m3u8 结尾
+            finds = re.findall(r'https?://[^\s"\'<>]+playlist/[^\s"\'<>]+m3u8', content)
             
-            if match:
-                secret_id = match.group(1)   # NIySmp86SwI
-                file_name = match.group(2)   # litv-longturn03...m3u8
-                
-                # 组合成完整的 Key 存入 workers.js
-                # 按照你的需求，存储为 /playlist/密匙/文件名 这种格式
-                final_key = f"{secret_id}/{file_name}"
-                print(f"✨ 成功截获！\n   ID: {secret_id}\n   File: {file_name}")
-                return final_key
-            else:
-                print(f"❌ 捕获失败。页面已渲染，但未在网络请求中发现 /playlist/ 路径。")
-                # 辅助诊断：看看有没有 playlist 关键字
-                if "playlist" in content:
-                    print("   [提示] 源码中包含 'playlist' 单词，但格式不符，请检查正则表达式。")
-
+            if finds:
+                # 排除报错的链接，找最复杂的那个
+                for raw_url in finds:
+                    if "avc1" in raw_url:
+                        # 提取 /playlist/ 之后的部分
+                        match = re.search(r'playlist/([a-zA-Z0-9_-]+/[^"\'\s]+\.m3u8)', raw_url)
+                        if match:
+                            result = match.group(1)
+                            print(f"✅ 嗅探成功！发现真实路径: {result}")
+                            return result
+            
+            # 如果上面没找到，打印一下 response 里的所有 URL 看看
+            print("⚠️ 未发现直接链接，正在扫描所有潜在请求...")
+            all_urls = re.findall(r'https?://[^\s"\'<>]+', content)
+            for u in all_urls:
+                if "m3u8" in u:
+                    print(f"🔎 发现可疑 M3U8: {u}")
+                    
         except Exception as e:
-            print(f"🔥 异常: {e}")
+            print(f"🔥 嗅探异常: {e}")
         return None
 
-    def run(self):
-        if not os.path.exists(self.worker_file): return
-        with open(self.worker_file, "r", encoding="utf-8") as f:
-            js_content = f.read()
-
-        any_updated = False
-        for cid, slug in self.channels.items():
-            result = self.capture_secret_key(cid, slug)
-            if result:
-                # 针对 workers.js 的 Key 进行精准替换
-                # 匹配 "lhtv01": { ... key: "旧值" }
-                pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-                replacement = f'"{cid}": {{ name: "", key: "{result}" }}'
-                js_content = re.sub(pattern, replacement, js_content, flags=re.DOTALL)
-                any_updated = True
-            
-            time.sleep(10) # 频道切换间隔
-
-        if any_updated:
-            with open(self.worker_file, "w", encoding="utf-8") as f:
-                f.write(js_content)
-            print("🚀 [SUCCESS] 所有频道 Key 已同步到 workers.js")
-        else:
-            print("💡 未发现任何有效更新。")
-
 if __name__ == "__main__":
-    hunter = OfiiiFinalHunter()
-    hunter.run()
+    sniffer = OfiiiNetworkSniffer()
+    sniffer.get_key_via_network_logs('lhtv01', 'litv-longturn03')
