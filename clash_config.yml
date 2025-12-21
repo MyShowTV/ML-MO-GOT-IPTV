@@ -1,3 +1,4 @@
+# 混合端口，脚本将通过 127.0.0.1:7890 访问代理
 mixed-port: 7890
 allow-lan: true
 mode: global
@@ -5,13 +6,13 @@ log-level: info
 ipv6: false
 
 proxies:
-  - name: "BrightData_TW"
+  - name: "BrightData_TW_DC"
     type: http
     server: brd.superproxy.io
     port: 33335
-    # 账号必须加引号，且必须带上国家后缀
-    username: "brd-customer-hl_739668d7-zone-residential_proxy1-country-tw"
-    password: "me6lrg0ysg96"
+    # 这里的用户名和密码使用了你刚才测试成功的 Datacenter 节点
+    username: "brd-customer-hl_739668d7-zone-datacenter_proxy1-country-tw"
+    password: "di168nnr7bb9"
 
 rules:
-  - MATCH,BrightData_TW
+  - MATCH,BrightData_TW_DC
