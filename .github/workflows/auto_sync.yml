@@ -1,4 +1,4 @@
-name: Ofiii-Auto-Sync-V3
+name: Ofiii-Auto-Sync-Direct
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  scrape-job:
+  run-sync:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,36 +14,27 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: 启动 Mihomo 代理
-        run: |
-          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
-          gunzip mihomo-linux-amd64-v1.18.9.gz
-          mv mihomo-linux-amd64-v1.18.9 mihomo
-          chmod +x mihomo
-          # 强制加载当前目录配置
-          ./mihomo -f ./clash_config.yaml -d . > mihomo.log 2>&1 &
-          sleep 40
-          echo "=== 代理验证 (预期应包含 Country: TW) ==="
-          curl -s -x http://127.0.0.1:7890 "https://geo.brdtest.com/welcome.txt?product=dc&method=native"
-
       - name: 设置 Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 安装依赖
+      - name: 安装 Chrome 浏览器
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+
+      - name: 安装依赖
+        run: |
           pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
 
-      - name: 运行同步
+      - name: 启动爬虫
         run: python cloud_sync.py
 
-      - name: 推送变更
+      - name: 提交并同步
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
           git add workers.js
-          git commit -m "DC Proxy Sync: $(date)" || exit 0
+          git commit -m "Direct Proxy Update: $(date)" || exit 0
           git push
