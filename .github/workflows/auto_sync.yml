@@ -1,9 +1,9 @@
-name: Ofiii-Auto-Capture-Residential
+name: Ofiii-Auto-Capture
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # 每 2 小时运行一次
-  workflow_dispatch:
+    - cron: '0 */2 * * *'   # 每 2 小时自动执行
+  workflow_dispatch:         # 允许手动触发
 
 jobs:
   build-and-run:
@@ -15,18 +15,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: 启动 Mihomo 隧道
-        run: |
-          wget https://github.com/MetaCubeX/Mihomo/releases/download/v1.18.9/mihomo-linux-amd64-v1.18.9.gz
-          gunzip mihomo-linux-amd64-v1.18.9.gz
-          mv mihomo-linux-amd64-v1.18.9 mihomo
-          chmod +x mihomo
-          ./mihomo -f clash_config.yaml -d . & 
-          sleep 20
-          echo "验证住宅代理 IP (应显示为台湾):"
-          curl -x http://127.0.0.1:7890 https://ifconfig.me
-
-      - name: 设置 Python
+      - name: 设置 Python 环境
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
@@ -35,15 +24,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-          pip install blinker==1.7.0 selenium==4.9.0 selenium-wire==5.1.0 chromedriver-autoinstaller
+          pip install -r requirements.txt
 
-      - name: 执行抓取
+      - name: 执行抓取脚本
+        env:
+          BD_PROXY: "http://${{ secrets.BD_USER }}:${{ secrets.BD_PASS }}@brd.superproxy.io:33335"
         run: python cloud_sync.py
 
-      - name: 提交并推送
+      - name: 提交并推送更新
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "TV-Bot"
           git add workers.js
-          git commit -m "住宅代理同步: $(date)" || exit 0
+          git commit -m "Update Channels: $(date)" || exit 0
           git push
