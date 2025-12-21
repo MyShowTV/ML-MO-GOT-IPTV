@@ -3,7 +3,7 @@ from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class OfiiiApiInterceptor:
+class OfiiiFinalHunter:
     def __init__(self):
         # 住宅代理凭据
         self.proxy_host = "brd.superproxy.io:33335"
@@ -11,6 +11,7 @@ class OfiiiApiInterceptor:
         self.proxy_pass = "me6lrg0ysg96"
         
         self.worker_file = "workers.js"
+        # 频道映射
         self.channels = {
             'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
             'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
@@ -18,52 +19,48 @@ class OfiiiApiInterceptor:
             'lhtv07': 'litv-longturn02'
         }
 
-    def intercept_m3u8(self, cid, slug):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🕵️ 拦截模式启动: {cid}")
+    def capture_secret_key(self, cid, slug):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛡️ 正在攻克频道: {cid} ({slug})")
         
         proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}"
         proxies = {"http": proxy_url, "https": proxy_url}
         
-        # --- 核心修改：让 Bright Data 像浏览器控制台一样监控网络 ---
+        # 指令：开启浏览器渲染 + 执行点击 + 捕获网络日志
         headers = {
             "x-api-render": "true",
             "x-api-actions": json.dumps([
                 {"wait": ".video-player"},
                 {"click": ".vjs-big-play-button"},
-                {"wait": 15000} # 等待加载正片
+                {"wait": 15000}  # 给足 15 秒让浏览器发出 m3u8 请求
             ])
         }
 
         try:
-            # 1. 首先尝试请求主页并拦截
             url = f"https://www.ofiii.com/channel/watch/{slug}"
             response = requests.get(url, proxies=proxies, headers=headers, timeout=180, verify=False)
             
-            # 2. 在整个响应（包含 JS 执行后的 DOM）中深度搜索带有 avc1 的 m3u8 
-            # 刚才你提供的 ID 包含 "avc1"，我们直接以此为特征码
+            # 在返回的所有内容（包括网络日志快照）中搜索 /playlist/ 结构
             content = response.text
             
-            # 匹配包含 avc1 和 m3u8 的最长字符串
-            pattern = r'([^\s"\'<>]+avc1[^\s"\'<>]+?\.m3u8)'
+            # 正则 A：提取完整结构 /playlist/密匙/文件名.m3u8
+            # 兼容你提供的格式： NIySmp86SwI/litv-longturn03-avc1_336000=1-mp4a_114000=2.m3u8
+            pattern = r'playlist/([a-zA-Z0-9_-]+)/([^"\'\s]+\.m3u8)'
             match = re.search(pattern, content)
             
-            if not match:
-                # 备选方案：找任何带有 litv 前缀的 m3u8
-                pattern = r'([^\s"\'<>]+litv[^\s"\'<>]+?\.m3u8)'
-                match = re.search(pattern, content)
-
             if match:
-                m3u8_full = match.group(1)
-                # 提取文件名部分作为 Key
-                key = m3u8_full.split('/')[-1]
-                print(f"✅ 拦截成功！Key: {key}")
-                return key
+                secret_id = match.group(1)   # NIySmp86SwI
+                file_name = match.group(2)   # litv-longturn03...m3u8
+                
+                # 组合成完整的 Key 存入 workers.js
+                # 按照你的需求，存储为 /playlist/密匙/文件名 这种格式
+                final_key = f"{secret_id}/{file_name}"
+                print(f"✨ 成功截获！\n   ID: {secret_id}\n   File: {file_name}")
+                return final_key
             else:
-                print(f"❌ 页面已渲染，但流量中未发现符合 'avc1' 格式的 m3u8 链接。")
-                # 打印一小段 video 相关的源码进行最后确认
-                v_idx = content.find('video')
-                if v_idx != -1:
-                    print(f"   [Video 上下文]: {content[v_idx:v_idx+300]}")
+                print(f"❌ 捕获失败。页面已渲染，但未在网络请求中发现 /playlist/ 路径。")
+                # 辅助诊断：看看有没有 playlist 关键字
+                if "playlist" in content:
+                    print("   [提示] 源码中包含 'playlist' 单词，但格式不符，请检查正则表达式。")
 
         except Exception as e:
             print(f"🔥 异常: {e}")
@@ -72,25 +69,28 @@ class OfiiiApiInterceptor:
     def run(self):
         if not os.path.exists(self.worker_file): return
         with open(self.worker_file, "r", encoding="utf-8") as f:
-            content = f.read()
+            js_content = f.read()
 
-        updated = False
+        any_updated = False
         for cid, slug in self.channels.items():
-            new_key = self.intercept_m3u8(cid, slug)
-            if new_key:
-                # 针对你提供的格式 (包含 = 和 空格) 的正则更新
+            result = self.capture_secret_key(cid, slug)
+            if result:
+                # 针对 workers.js 的 Key 进行精准替换
+                # 匹配 "lhtv01": { ... key: "旧值" }
                 pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
-                replacement = f'"{cid}": {{ name: "", key: "{new_key}" }}'
-                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
-                updated = True
-            time.sleep(10)
+                replacement = f'"{cid}": {{ name: "", key: "{result}" }}'
+                js_content = re.sub(pattern, replacement, js_content, flags=re.DOTALL)
+                any_updated = True
+            
+            time.sleep(10) # 频道切换间隔
 
-        if updated:
+        if any_updated:
             with open(self.worker_file, "w", encoding="utf-8") as f:
-                f.write(content)
-            print("🚀 数据已同步到 workers.js")
+                f.write(js_content)
+            print("🚀 [SUCCESS] 所有频道 Key 已同步到 workers.js")
         else:
-            print("💡 未发现更新。")
+            print("💡 未发现任何有效更新。")
 
 if __name__ == "__main__":
-    OfiiiApiInterceptor().run()
+    hunter = OfiiiFinalHunter()
+    hunter.run()
