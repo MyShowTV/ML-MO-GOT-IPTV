@@ -4,6 +4,7 @@ mode: global
 log-level: info
 ipv6: false
 
+# 代理节点配置
 proxies:
   - name: "BrightData_TW_Resi"
     type: http
