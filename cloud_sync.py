@@ -1,66 +1,61 @@
 import os, re, time, requests, json
 import urllib3
 
-# 禁用证书警告
+# 禁用安全警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_asset_id(cid, slug):
-    print(f"🌐 正在通过 API 启动云端真机浏览器: {cid}...")
+    print(f"🌐 启动真机模拟 [频道: {cid}]...")
     
-    # --- 你的 API 核心配置 ---
-    api_url = "https://api.brightdata.com/request"
-    api_token = "76b7e42b-9c49-4acb-819a-3f90b45be668"
+    # --- 必须确保这些信息与你截图中的“直接 API 访问”完全一致 ---
+    API_TOKEN = "76b7e42b-9c49-4acb-819a-3f90b45be668"
+    ZONE = "unblocker_ofiii" 
     
+    url = "https://api.brightdata.com/request"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_token}"
+        "Authorization": f"Bearer {API_TOKEN}"
     }
     
-    # --- 深度模拟指令 (JSON 格式) ---
-    data = {
-        "zone": "unblocker_ofiii",
+    # 深度模拟真实 PC 浏览器行为
+    payload = {
+        "zone": ZONE,
         "url": f"https://www.ofiii.com/channel/watch/{slug}",
         "format": "raw",
-        "country": "tw",           # 锁定台湾 IP
-        "render": True,            # 开启云端真机渲染
-        # 伪装成真实的 Windows 10 PC 浏览器
+        "country": "tw",
+        "render": True,
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "actions": [
-            {"wait": ".video-player"},           # 等待播放器框架
-            {"scroll_to": ".video-player"},      # 滚动到视野内（模拟真人看视频）
-            {"click": ".vjs-big-play-button"},   # 【关键】真实点击播放按钮
-            {"wait": 10000}                      # 强制停留 10 秒，拦截生成的 m3u8 ID
+            {"wait": ".video-player"},
+            {"click": ".vjs-big-play-button"}, # 点击播放按钮
+            {"wait": 8000}                     # 等待数据加载
         ]
     }
 
     try:
-        # 向 Bright Data 的 API 发送 POST 请求
-        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
         
         if response.status_code == 200:
             content = response.text
-            
-            # 从返回的完整渲染代码中抓取 AssetID
-            # 匹配模式：playlist/后面那一串动态 ID
+            # 提取 AssetID
             match = re.search(r'playlist/([a-z0-9A-Z_-]+)/', content)
-            
             if match:
                 aid = match.group(1)
-                print(f"✨ 真机模拟成功！ID: {aid}")
+                print(f"✅ 成功获取 ID: {aid}")
                 return aid
             else:
-                # 打印标题，确认是否成功进入了台湾网页
-                title = re.search(r'<title>(.*?)</title>', content)
-                print(f"⚠️ 点击已执行，但未提取到 ID。网页标题: {title.group(1) if title else '未知'}")
+                print("⚠️ 页面已渲染但未匹配到 ID。可能是选择器变化或区域限制。")
+        elif response.status_code == 401:
+            print("❌ 验证失败 (401): 请检查 Token 是否过期，或 Zone 名称是否正确。")
         else:
-            print(f"❌ API 响应错误: {response.status_code} - {response.text[:200]}")
+            print(f"❌ API 错误: {response.status_code} - {response.text}")
             
     except Exception as e:
-        print(f"🔥 运行异常: {e}")
+        print(f"🔥 网络异常: {e}")
     return None
 
 def main():
-    # 频道配置
+    # 频道列表
     channels = {
         'lhtv01': 'litv-longturn03', 'lhtv02': 'litv-longturn21',
         'lhtv03': 'litv-longturn18', 'lhtv04': 'litv-longturn11',
@@ -70,7 +65,7 @@ def main():
     
     worker_file = "workers.js"
     if not os.path.exists(worker_file):
-        print(f"❌ 错误: 找不到 {worker_file}")
+        print("❌ 找不到 workers.js")
         return
 
     with open(worker_file, "r", encoding="utf-8") as f:
@@ -80,21 +75,19 @@ def main():
     for cid, slug in channels.items():
         aid = get_asset_id(cid, slug)
         if aid:
-            # 更新 workers.js
+            # 更新 workers.js 里的 key
             pattern = rf'"{cid}"\s*:\s*\{{[^}}]*?key\s*:\s*["\'][^"\']*["\']'
             replacement = f'"{cid}": {{ name: "", key: "{aid}" }}'
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             updated = True
-        
-        # 这种高强度模拟非常吃资源，请在频道间保持长间隔
-        time.sleep(15)
+        time.sleep(10) # 模拟真机需要时间间隔
 
     if updated:
         with open(worker_file, "w", encoding="utf-8") as f:
             f.write(content)
-        print("🚀 workers.js 更新完毕！")
+        print("🚀 数据同步成功！")
     else:
-        print("💡 本次未发现变动，未更新文件。")
+        print("💡 无数据变动。")
 
 if __name__ == "__main__":
     main()
